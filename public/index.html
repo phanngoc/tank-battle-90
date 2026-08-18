@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <meta name="theme-color" content="#1c1f2b" />
 <title>TANK BATTLE 90</title>
-<link rel="stylesheet" href="style.css?v=2" />
+<link rel="stylesheet" href="style.css?v=4" />
 </head>
 <body>
   <div class="console" id="console">
@@ -46,7 +46,7 @@
             <div class="ov-hint">Bảo vệ đại bàng 🦅 · Diệt 20 xe địch · Bắn xe nhấp nháy nhận vật phẩm</div>
           </div>
           <!-- WAITING ROOM: shown after creating a room, until player 2 joins or host starts -->
-          <div class="ov-card hidden" id="ovWait">
+          <div class="ov-card" id="ovWait" style="display:none">
             <div class="ov-title">Phòng <span id="invCode" class="inv-code">----</span></div>
             <div class="ov-wait" id="ovWaitMsg"><span class="dots">⏳</span> Đang đợi người chơi… <b id="waitCount">1</b>/4</div>
             <div class="ov-sub">Gửi link này cho người chơi thứ 2:</div>
@@ -56,7 +56,7 @@
             <div class="ov-hint">Trận tự bắt đầu khi người chơi thứ 2 vào (tối đa 4 người).</div>
           </div>
           <!-- GAME OVER -->
-          <div class="ov-card hidden" id="ovOver">
+          <div class="ov-card" id="ovOver" style="display:none">
             <div class="ov-title">GAME OVER</div>
             <div class="ov-sub" id="overSub"></div>
             <button class="ov-btn" id="restartBtn2">CHƠI LẠI</button>
@@ -87,6 +87,6 @@
     <div class="speaker"><span></span><span></span><span></span><span></span><span></span><span></span></div>
   </div>
 
-  <script src="client.js?v=2"></script>
+  <script src="client.js?v=4"></script>
 </body>
 </html>

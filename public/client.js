@@ -500,9 +500,10 @@ function updateOverlay() {
 function showOverlay(mode) {
   overlayMode = mode;
   overlay.classList.remove('hidden');
-  ovMenu.classList.toggle('hidden', mode !== 'menu');
-  ovWait.classList.toggle('hidden', mode !== 'waiting');
-  ovOver.classList.toggle('hidden', mode !== 'gameover');
+  // drive via inline display so exactly one card shows regardless of cached CSS
+  ovMenu.style.display = mode === 'menu' ? 'flex' : 'none';
+  ovWait.style.display = mode === 'waiting' ? 'flex' : 'none';
+  ovOver.style.display = mode === 'gameover' ? 'flex' : 'none';
   if (mode === 'waiting') {
     invCode.textContent = myRoom;
     invLink.textContent = inviteLink(myRoom);
