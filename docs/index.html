@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>TANK BATTLE 90 — Bắn xe tăng co-op kiểu điện tử băng</title>
+<meta name="description" content="Game bắn xe tăng co-op realtime nhiều người trên trình duyệt & điện thoại, giao diện máy điện tử băng cổ điển. Clone luật Battle City / Tank 1990." />
+<meta property="og:title" content="TANK BATTLE 90" />
+<meta property="og:description" content="Bắn xe tăng co-op realtime, giao diện máy điện tử băng. Chơi demo ngay trên trình duyệt." />
+<meta property="og:image" content="img/screen-gameplay.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<style>
+  :root{ --bg:#0b0d16; --bg2:#141828; --accent:#ffd23f; --accent2:#e94f37; --txt:#e8ecff; --muted:#8b90b5; --chip:#232840; }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html{scroll-behavior:smooth;}
+  body{ font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif; color:var(--txt);
+    background:radial-gradient(1200px 700px at 50% -10%,#2a2f52,#0b0d16 65%); line-height:1.6; overflow-x:hidden;}
+  a{color:var(--accent); text-decoration:none;}
+  .wrap{max-width:1040px; margin:0 auto; padding:0 20px;}
+
+  header{padding:20px 0; display:flex; align-items:center; justify-content:space-between;}
+  .logo{font-weight:900; letter-spacing:2px; font-size:20px; color:var(--accent);}
+  .logo span{color:var(--accent2);}
+  nav a{color:var(--muted); margin-left:18px; font-size:14px;}
+  nav a:hover{color:var(--txt);}
+
+  .hero{display:grid; grid-template-columns:1.1fr .9fr; gap:36px; align-items:center; padding:40px 0 30px;}
+  .hero h1{font-size:44px; line-height:1.1; letter-spacing:1px; margin-bottom:14px;}
+  .hero h1 .y{color:var(--accent);} .hero h1 .r{color:var(--accent2);}
+  .tag{font-size:17px; color:var(--muted); margin-bottom:20px; max-width:520px;}
+  .badges{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:24px;}
+  .badges img{height:22px;}
+  .cta{display:flex; flex-wrap:wrap; gap:12px;}
+  .btn{display:inline-flex; align-items:center; gap:8px; padding:13px 22px; border-radius:12px; font-weight:800;
+    letter-spacing:.5px; font-size:15px; cursor:pointer; border:none; transition:transform .06s;}
+  .btn:active{transform:translateY(2px);}
+  .btn-primary{background:linear-gradient(180deg,#ffd23f,#e0a800); color:#2a1d00; box-shadow:0 5px 0 #9c7600;}
+  .btn-ghost{background:var(--chip); color:var(--txt); box-shadow:0 5px 0 #12162a;}
+  .hero-media{ border-radius:18px; overflow:hidden; background:#05070c;
+    box-shadow:0 20px 60px rgba(0,0,0,.55), inset 0 0 0 2px rgba(255,255,255,.05);}
+  .hero-media img{display:block; width:100%; image-rendering:pixelated;}
+
+  section{padding:44px 0;}
+  h2{font-size:28px; margin-bottom:8px; letter-spacing:.5px;}
+  h2 .em{color:var(--accent);}
+  .sub{color:var(--muted); margin-bottom:26px;}
+
+  .grid{display:grid; grid-template-columns:repeat(3,1fr); gap:16px;}
+  .card{background:var(--bg2); border:1px solid rgba(255,255,255,.06); border-radius:14px; padding:20px;}
+  .card .ic{font-size:26px; margin-bottom:8px;}
+  .card h3{font-size:16px; margin-bottom:6px;}
+  .card p{color:var(--muted); font-size:14px;}
+
+  .shots{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; align-items:start;}
+  .shots figure{background:var(--bg2); border-radius:14px; overflow:hidden; border:1px solid rgba(255,255,255,.06);}
+  .shots img{display:block; width:100%;}
+  .shots figcaption{padding:10px 12px; font-size:13px; color:var(--muted); text-align:center;}
+
+  table{width:100%; border-collapse:collapse; background:var(--bg2); border-radius:14px; overflow:hidden;}
+  th,td{padding:12px 14px; text-align:left; border-bottom:1px solid rgba(255,255,255,.06); font-size:14px;}
+  th{background:#1b2036; color:var(--accent); font-size:13px; letter-spacing:.5px;}
+  td b{color:var(--txt);}
+
+  .cols{display:grid; grid-template-columns:1fr 1fr; gap:24px;}
+  .panel{background:var(--bg2); border:1px solid rgba(255,255,255,.06); border-radius:14px; padding:22px;}
+  .panel h3{margin-bottom:12px; font-size:18px;}
+  .panel ul{list-style:none;} .panel li{padding:5px 0; color:var(--muted); font-size:14px;}
+  .panel li b{color:var(--txt);}
+  pre{background:#05070c; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:16px; overflow-x:auto;
+    font-size:13px; color:#cfe3ff; margin-top:10px;}
+  .kbd{display:inline-block; background:#05070c; border:1px solid #333a5c; border-radius:6px; padding:1px 7px; font-size:12px; color:#cfd4ff;}
+
+  footer{padding:36px 0; text-align:center; color:var(--muted); font-size:13px; border-top:1px solid rgba(255,255,255,.06); margin-top:20px;}
+
+  @media (max-width:820px){
+    .hero{grid-template-columns:1fr; gap:22px;} .hero h1{font-size:34px;}
+    .grid,.shots{grid-template-columns:1fr;} .cols{grid-template-columns:1fr;}
+    nav{display:none;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo">TANK BATTLE <span>90</span></div>
+    <nav>
+      <a href="#features">Tính năng</a>
+      <a href="#shots">Ảnh</a>
+      <a href="#play">Cách chơi</a>
+      <a href="https://github.com/phanngoc/tank-battle-90">GitHub</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <div>
+      <h1>Bắn xe tăng <span class="y">co-op</span><br>kiểu <span class="r">điện tử băng</span></h1>
+      <p class="tag">Game bắn tăng 2D realtime nhiều người, chơi trên trình duyệt & điện thoại.
+        Giao diện máy cầm tay cổ điển: màn hình LCD ở trên, D-pad + nút bắn ở dưới. Lấy cảm hứng
+        từ huyền thoại Battle City / Tank 1990.</p>
+      <div class="badges">
+        <img alt="license" src="https://img.shields.io/badge/license-MIT-blue" />
+        <img alt="node" src="https://img.shields.io/badge/Node.js-%E2%89%A518-green?logo=node.js&logoColor=white" />
+        <img alt="ws" src="https://img.shields.io/badge/realtime-WebSocket-orange" />
+        <img alt="players" src="https://img.shields.io/badge/co--op-up%20to%204P-ffd23f" />
+        <img alt="mobile" src="https://img.shields.io/badge/mobile-friendly-e94f37" />
+      </div>
+      <div class="cta">
+        <a class="btn btn-primary" href="demo.html">▶ Chơi Demo ngay</a>
+        <a class="btn btn-ghost" href="https://github.com/phanngoc/tank-battle-90">⭐ Mã nguồn</a>
+      </div>
+    </div>
+    <div class="hero-media">
+      <img src="img/gameplay.gif" alt="TANK BATTLE 90 gameplay" />
+    </div>
+  </section>
+
+  <section id="features">
+    <h2>Tính <span class="em">năng</span></h2>
+    <p class="sub">Đầy đủ cơ chế của dòng game bắn tăng cổ điển, viết lại từ đầu.</p>
+    <div class="grid">
+      <div class="card"><div class="ic">🎮</div><h3>Máy điện tử băng</h3><p>Khung máy cầm tay, màn hình LCD có scanline, D-pad + nút BẮN cỡ lớn — tối ưu cho cảm ứng.</p></div>
+      <div class="card"><div class="ic">🌐</div><h3>Co-op realtime</h3><p>Tối đa 4 người cùng phòng qua WebSocket. Server giữ trạng thái chuẩn, đồng bộ mượt.</p></div>
+      <div class="card"><div class="ic">🦅</div><h3>Bảo vệ đại bàng</h3><p>Giữ căn cứ, diệt 20 xe địch mỗi màn qua 3 màn với địa hình khác nhau.</p></div>
+      <div class="card"><div class="ic">⭐</div><h3>6 vật phẩm</h3><p>Ngôi sao, đồng hồ, xẻng, lựu đạn, mũ giáp, thêm mạng — bắn xe nhấp nháy để nhận.</p></div>
+      <div class="card"><div class="ic">🧱</div><h3>Địa hình đa dạng</h3><p>Gạch vỡ được, thép cứng, nước chặn xe, bụi cây che khuất — chiến thuật thật sự.</p></div>
+      <div class="card"><div class="ic">🤖</div><h3>4 loại xe địch</h3><p>Basic, Fast, Power (bắn nhanh), Armor (4 giáp). Xe nhấp nháy mang vật phẩm.</p></div>
+    </div>
+  </section>
+
+  <section id="shots">
+    <h2>Ảnh <span class="em">chụp</span></h2>
+    <p class="sub">Chụp trực tiếp từ game đang chạy.</p>
+    <div class="shots">
+      <figure><img src="img/screen-title.png" alt="Màn hình bắt đầu" /><figcaption>Màn hình bắt đầu</figcaption></figure>
+      <figure><img src="img/screen-gameplay.png" alt="Trong trận" /><figcaption>Trong trận đấu</figcaption></figure>
+      <figure><img src="img/gameplay.gif" alt="Gameplay động" /><figcaption>Gameplay (động)</figcaption></figure>
+    </div>
+  </section>
+
+  <section id="play">
+    <h2>Cách <span class="em">chơi</span></h2>
+    <div class="cols">
+      <div class="panel">
+        <h3>Điều khiển</h3>
+        <ul>
+          <li><b>Điện thoại:</b> D-pad để di chuyển, nút <b>BẮN</b> (giữ = bắn liên tục).</li>
+          <li><b>Máy tính:</b> <span class="kbd">↑ ↓ ← →</span> / <span class="kbd">W A S D</span> di chuyển, <span class="kbd">Space</span> bắn.</li>
+          <li><b>START:</b> vào trận / chơi lại.</li>
+        </ul>
+        <h3 style="margin-top:16px">Chơi co-op nhiều người</h3>
+        <pre>git clone https://github.com/phanngoc/tank-battle-90.git
+cd tank-battle-90
+npm install
+npm start   # → http://localhost:3000</pre>
+        <ul><li>Mở URL LAN trên nhiều điện thoại/máy cùng Wi-Fi → vào chung một trận.</li></ul>
+      </div>
+      <div class="panel">
+        <h3>Vật phẩm</h3>
+        <table>
+          <tr><th>Vật phẩm</th><th>Hiệu ứng</th></tr>
+          <tr><td>⭐ <b>Ngôi sao</b></td><td>Nâng cấp: đạn nhanh → 2 viên → phá được thép</td></tr>
+          <tr><td>⏰ <b>Đồng hồ</b></td><td>Đóng băng toàn bộ địch ~8s</td></tr>
+          <tr><td>⛏️ <b>Xẻng</b></td><td>Tường quanh căn cứ hoá thép ~15s</td></tr>
+          <tr><td>💣 <b>Lựu đạn</b></td><td>Diệt sạch địch đang trên bản đồ</td></tr>
+          <tr><td>🛡️ <b>Mũ giáp</b></td><td>Khiên bất tử tạm thời ~10s</td></tr>
+          <tr><td>🚗 <b>Xe tăng</b></td><td>+1 mạng</td></tr>
+        </table>
+      </div>
+    </div>
+    <div style="text-align:center; margin-top:30px">
+      <a class="btn btn-primary" href="demo.html">▶ Chơi Demo ngay trên trình duyệt</a>
+    </div>
+  </section>
+
+  <footer>
+    Made with 🕹️ · MIT License · <a href="https://github.com/phanngoc/tank-battle-90">github.com/phanngoc/tank-battle-90</a><br>
+    Đồ hoạ &amp; code nguyên bản. Lấy cảm hứng từ dòng game bắn tăng 2D cổ điển.
+  </footer>
+
+</div>
+</body>
+</html>

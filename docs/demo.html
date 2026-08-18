@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#1c1f2b" />
+<title>TANK BATTLE 90 — Demo</title>
+<link rel="stylesheet" href="style.css" />
+<style>
+  .backlink{position:fixed; top:10px; left:12px; z-index:20; font:600 12px system-ui;
+    color:#cfd4ff; text-decoration:none; background:rgba(20,23,38,.7); padding:6px 10px;
+    border-radius:9px; border:1px solid rgba(255,255,255,.08);}
+  .backlink:active{transform:translateY(1px);}
+</style>
+</head>
+<body>
+  <a class="backlink" href="index.html">← Trang giới thiệu</a>
+  <div class="console" id="console">
+    <div class="brand-row">
+      <div class="brand">TANK&nbsp;BATTLE&nbsp;<span class="brand-90">90</span></div>
+      <div class="net on" id="net">• demo 1P</div>
+    </div>
+
+    <div class="hud" id="hud">
+      <div class="hud-left">
+        <span class="hud-chip">STAGE <b id="hudStage">1</b></span>
+        <span class="hud-chip">敵 <b id="hudEnemies">20</b></span>
+      </div>
+      <div class="hud-players" id="hudPlayers"></div>
+    </div>
+
+    <div class="screen-bezel">
+      <div class="screen" id="screen">
+        <canvas id="game" width="416" height="416"></canvas>
+        <div class="overlay" id="overlay">
+          <div class="ov-title" id="ovTitle">TANK BATTLE 90</div>
+          <div class="ov-sub" id="ovSub">Demo 1 người · chạy ngay trong trình duyệt</div>
+          <button class="ov-btn" id="ovBtn">START</button>
+          <div class="ov-hint">Bảo vệ đại bàng 🦅 · Diệt 20 xe địch · Bắn xe nhấp nháy để nhận vật phẩm</div>
+        </div>
+        <div class="mute" id="mute" title="Bật/tắt âm">🔊</div>
+      </div>
+    </div>
+
+    <div class="deck">
+      <div class="dpad" id="dpad">
+        <button class="dbtn up"    data-dir="0" aria-label="up">▲</button>
+        <button class="dbtn left"  data-dir="3" aria-label="left">◀</button>
+        <div class="dcenter"></div>
+        <button class="dbtn right" data-dir="1" aria-label="right">▶</button>
+        <button class="dbtn down"  data-dir="2" aria-label="down">▼</button>
+      </div>
+      <div class="actions">
+        <div class="sys-btns"><button class="sys" id="startBtn">START</button></div>
+        <button class="fire" id="fireBtn">BẮN<br><small>FIRE</small></button>
+      </div>
+    </div>
+
+    <div class="speaker"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+  </div>
+
+  <script src="game.js"></script>
+  <script src="demo.js"></script>
+</body>
+</html>
