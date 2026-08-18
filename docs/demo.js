@@ -20,6 +20,8 @@ const forest = document.createElement('canvas');
 let tctx, fctx;
 
 let grid = null, waterTiles = [], latest = null, me = 0, joined = false, statusText = 'lobby';
+const snaps = [];          // interpolation buffer for smooth 60fps motion
+const INTERP_DELAY = 100;
 
 const netEl = document.getElementById('net');
 const overlay = document.getElementById('overlay');
@@ -62,8 +64,35 @@ function step() {
   else if (s.mapDelta && s.mapDelta.length) for (const d of s.mapDelta) applyDelta(d.x, d.y, d.t);
   latest = s; statusText = s.status;
   if (s.events) for (const e of s.events) playSfx(e);
+  snaps.push({ t: performance.now(), s });
+  while (snaps.length > 12) snaps.shift();
   updateHud(s);
   updateOverlay();
+}
+
+// interpolate tank/bullet positions between two snapshots (matched by id)
+function lerpState(sa, sb, al) {
+  const at = new Map(); for (const t of sa.tanks) at.set(t.id, t);
+  const tanks = sb.tanks.map(t => {
+    const p = at.get(t.id);
+    return p ? { ...t, x: p.x + (t.x - p.x) * al, y: p.y + (t.y - p.y) * al } : t;
+  });
+  const ab = new Map(); for (const b of sa.bullets) ab.set(b.id, b);
+  const bullets = sb.bullets.map(b => {
+    const p = ab.get(b.id);
+    return p ? { ...b, x: p.x + (b.x - p.x) * al, y: p.y + (b.y - p.y) * al } : b;
+  });
+  return { ...sb, tanks, bullets };
+}
+function viewAt(rt) {
+  if (snaps.length === 0) return latest;
+  if (snaps.length === 1 || rt >= snaps[snaps.length - 1].t) return snaps[snaps.length - 1].s;
+  if (rt <= snaps[0].t) return snaps[0].s;
+  for (let i = 0; i < snaps.length - 1; i++) {
+    const a = snaps[i], b = snaps[i + 1];
+    if (a.t <= rt && rt <= b.t) return lerpState(a.s, b.s, (rt - a.t) / ((b.t - a.t) || 1));
+  }
+  return snaps[snaps.length - 1].s;
 }
 
 function applyLocalCtrl() {
@@ -150,18 +179,19 @@ function render() {
   requestAnimationFrame(render);
   if (!grid) return;
   const tick = latest ? latest.tick : 0;
+  const view = viewAt(performance.now() - INTERP_DELAY);
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, FIELD_W, FIELD_H);
   ctx.drawImage(terrain, 0, 0);
   drawWater(tick);
-  drawBase(latest);
-  if (latest) {
-    for (const p of latest.powerups) drawPowerup(p, tick);
-    for (const t of latest.tanks) drawTank(t, tick, latest.frozen);
-    for (const b of latest.bullets) drawBullet(b);
-    for (const e of latest.effects) drawEffect(e);
+  drawBase(view);
+  if (view) {
+    for (const p of view.powerups) drawPowerup(p, tick);
+    for (const t of view.tanks) drawTank(t, tick, view.frozen);
+    for (const b of view.bullets) drawBullet(b);
+    for (const e of view.effects) drawEffect(e);
   }
   ctx.drawImage(forest, 0, 0);
-  if (latest && latest.frozen) { ctx.fillStyle = 'rgba(120,190,255,.10)'; ctx.fillRect(0, 0, FIELD_W, FIELD_H); }
+  if (view && view.frozen) { ctx.fillStyle = 'rgba(120,190,255,.10)'; ctx.fillRect(0, 0, FIELD_W, FIELD_H); }
   if (statusText === 'stageclear') drawBanner('STAGE ' + (latest ? latest.stage : ''), 'CLEAR!');
 }
 function drawWater(tick) {
