@@ -52,13 +52,15 @@ body{
   overflow:hidden; background:var(--lcd);
   box-shadow:inset 0 0 40px rgba(0,0,0,.6);
   contain:paint;}
+/* own GPU layer so per-frame canvas repaints don't re-rasterize the screen's
+   inset shadow / scanline (a big win on iOS Safari) */
 #game{display:block; width:100%; height:100%; image-rendering:pixelated;
-  image-rendering:crisp-edges;}
+  image-rendering:crisp-edges; transform:translateZ(0); will-change:transform; backface-visibility:hidden;}
 
 /* CRT scanline vibe (plain alpha gradient — no mix-blend-mode, cheaper to composite) */
 .screen::after{content:""; position:absolute; inset:0; pointer-events:none; z-index:2;
   background:repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 1px,transparent 1px 3px);
-  opacity:.4;}
+  opacity:.4; transform:translateZ(0);}
 
 .overlay{position:absolute; inset:0; display:flex; flex-direction:column;
   align-items:center; justify-content:center; gap:10px; text-align:center;

@@ -268,57 +268,56 @@ function drawForest(g, x, y) {
 // =====================================================================
 // Rendering loop
 // =====================================================================
-// interpolate positions of tanks/bullets between two snapshots (matched by id)
-function lerpState(sa, sb, al) {
-  const at = new Map(); for (const t of sa.tanks) at.set(t.id, t);
-  const tanks = sb.tanks.map(t => {
-    const p = at.get(t.id);
-    return p ? { ...t, x: p.x + (t.x - p.x) * al, y: p.y + (t.y - p.y) * al } : t;
-  });
-  const ab = new Map(); for (const b of sa.bullets) ab.set(b.id, b);
-  const bullets = sb.bullets.map(b => {
-    const p = ab.get(b.id);
-    return p ? { ...b, x: p.x + (b.x - p.x) * al, y: p.y + (b.y - p.y) * al } : b;
-  });
-  return { ...sb, tanks, bullets };
-}
-
-// pick/interpolate the view to render for a given render time (ms)
-function viewAt(rt) {
-  if (snaps.length === 0) return latest;
-  if (snaps.length === 1 || rt >= snaps[snaps.length - 1].t) return snaps[snaps.length - 1].s;
-  if (rt <= snaps[0].t) return snaps[0].s;
-  for (let i = 0; i < snaps.length - 1; i++) {
-    const a = snaps[i], b = snaps[i + 1];
-    if (a.t <= rt && rt <= b.t) {
-      const span = b.t - a.t || 1;
-      return lerpState(a.s, b.s, (rt - a.t) / span);
+// pick the two snapshots bracketing renderTime; sets interp fields on `frame`
+const frame = { a: null, b: null, al: 0 };
+function pickFrame(rt) {
+  frame.a = null; frame.b = null; frame.al = 0;
+  const n = snaps.length;
+  if (n === 0) { frame.b = latest; return; }
+  if (n === 1 || rt >= snaps[n - 1].t) { frame.b = snaps[n - 1].s; return; }
+  if (rt <= snaps[0].t) { frame.b = snaps[0].s; return; }
+  for (let i = 0; i < n - 1; i++) {
+    if (snaps[i].t <= rt && rt <= snaps[i + 1].t) {
+      frame.a = snaps[i].s; frame.b = snaps[i + 1].s;
+      frame.al = (rt - snaps[i].t) / ((snaps[i + 1].t - snaps[i].t) || 1);
+      return;
     }
   }
-  return snaps[snaps.length - 1].s;
+  frame.b = snaps[n - 1].s;
 }
+// previous-position lookup by id (linear; entity counts are tiny) — no per-frame allocation
+function prevPos(list, id) { if (!list) return null; for (let i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
 
 function render() {
   requestAnimationFrame(render);
   if (!grid) return;
   const tick = latest ? latest.tick : 0;
-  const view = viewAt(performance.now() - INTERP_DELAY);
+  pickFrame(performance.now() - INTERP_DELAY);
+  const b = frame.b, a = frame.a, al = frame.al;
 
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, FIELD_W, FIELD_H);
   ctx.drawImage(terrain, 0, 0);
   drawWater(tick);
-  drawBase(view);
+  drawBase(b);
 
-  if (view) {
-    for (const p of view.powerups) drawPowerup(p, tick);
-    for (const t of view.tanks) drawTank(t, tick, view.frozen);
-    for (const b of view.bullets) drawBullet(b);
-    for (const e of view.effects) drawEffect(e);
+  if (b) {
+    for (const p of b.powerups) drawPowerup(p, tick);
+    for (const t of b.tanks) {
+      let ix = t.x, iy = t.y;
+      if (a) { const p = prevPos(a.tanks, t.id); if (p) { ix = p.x + (t.x - p.x) * al; iy = p.y + (t.y - p.y) * al; } }
+      drawTank(t, tick, b.frozen, ix, iy);
+    }
+    for (const bl of b.bullets) {
+      let ix = bl.x, iy = bl.y;
+      if (a) { const p = prevPos(a.bullets, bl.id); if (p) { ix = p.x + (bl.x - p.x) * al; iy = p.y + (bl.y - p.y) * al; } }
+      drawBullet(bl, ix, iy);
+    }
+    for (const e of b.effects) drawEffect(e);
   }
 
   ctx.drawImage(forest, 0, 0); // bushes conceal tanks underneath
 
-  if (view && view.frozen) { ctx.fillStyle = 'rgba(120,190,255,.10)'; ctx.fillRect(0, 0, FIELD_W, FIELD_H); }
+  if (b && b.frozen) { ctx.fillStyle = 'rgba(120,190,255,.10)'; ctx.fillRect(0, 0, FIELD_W, FIELD_H); }
   if (statusText === 'stageclear') drawBanner('STAGE ' + (latest ? latest.stage : ''), 'CLEAR!');
 }
 
@@ -370,8 +369,8 @@ function enemyColor(t, tick) {
   return '#cdd2dc';
 }
 
-function drawTank(t, tick, frozen) {
-  const x = t.x, y = t.y, s = TILE * 2;
+function drawTank(t, tick, frozen, px, py) {
+  const x = px, y = py, s = TILE * 2;
   // spawn materialise animation
   if (t.sp) { drawSpawnStar(x + s / 2, y + s / 2, tick); return; }
   let col = t.k === 'p' ? t.c : enemyColor(t, tick);
@@ -422,11 +421,11 @@ function drawSpawnStar(cx, cy, tick) {
   ctx.stroke();
 }
 
-function drawBullet(b) {
+function drawBullet(b, x, y) {
   ctx.fillStyle = '#fff';
-  ctx.fillRect(b.x, b.y, 8, 8);
+  ctx.fillRect(x, y, 8, 8);
   ctx.fillStyle = '#ffd23f';
-  ctx.fillRect(b.x + 2, b.y + 2, 4, 4);
+  ctx.fillRect(x + 2, y + 2, 4, 4);
 }
 
 function drawPowerup(p, tick) {
