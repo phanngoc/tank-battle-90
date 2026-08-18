@@ -12,6 +12,7 @@
     <!-- top brand + status -->
     <div class="brand-row">
       <div class="brand">TANK&nbsp;BATTLE&nbsp;<span class="brand-90">90</span></div>
+      <button class="room-chip hidden" id="roomChip" title="Copy link mời"></button>
       <div class="net" id="net">• offline</div>
     </div>
 
@@ -29,11 +30,35 @@
       <div class="screen" id="screen">
         <canvas id="game" width="416" height="416"></canvas>
         <div class="overlay" id="overlay">
-          <div class="ov-title" id="ovTitle">TANK BATTLE 90</div>
-          <div class="ov-sub" id="ovSub">Nhập tên và nhấn START để tham chiến</div>
-          <input class="ov-input" id="nameInput" maxlength="12" placeholder="Tên người chơi" />
-          <button class="ov-btn" id="ovBtn">START</button>
-          <div class="ov-hint">Bảo vệ đại bàng 🦅 · Tiêu diệt toàn bộ xe địch · Co-op nhiều người</div>
+          <!-- MENU: create / join a room -->
+          <div class="ov-card" id="ovMenu">
+            <div class="ov-title">TANK BATTLE 90</div>
+            <div class="ov-sub" id="ovSub">Tạo phòng rồi mời bạn bè vào chơi co-op</div>
+            <input class="ov-input" id="nameInput" maxlength="12" placeholder="Tên của bạn" />
+            <button class="ov-btn" id="createBtn">🎮 TẠO PHÒNG MỚI</button>
+            <div class="ov-or">— hoặc vào phòng có sẵn —</div>
+            <div class="ov-join">
+              <input class="ov-input code" id="codeInput" maxlength="4" placeholder="MÃ" autocapitalize="characters" />
+              <button class="ov-btn ghost" id="joinBtn">VÀO</button>
+            </div>
+            <div class="ov-err" id="ovErr"></div>
+            <div class="ov-hint">Bảo vệ đại bàng 🦅 · Diệt 20 xe địch · Bắn xe nhấp nháy nhận vật phẩm</div>
+          </div>
+          <!-- INVITE: shown right after creating a room -->
+          <div class="ov-card hidden" id="ovInvite">
+            <div class="ov-title">Phòng <span id="invCode" class="inv-code">----</span></div>
+            <div class="ov-sub">Gửi link này cho người chơi thứ 2:</div>
+            <div class="ov-link" id="invLink"></div>
+            <button class="ov-btn" id="copyBtn">📋 Copy link mời</button>
+            <button class="ov-btn ghost" id="playBtn">▶ VÀO TRẬN</button>
+            <div class="ov-hint">Người chơi mới có thể vào bất cứ lúc nào (tối đa 4 người).</div>
+          </div>
+          <!-- GAME OVER -->
+          <div class="ov-card hidden" id="ovOver">
+            <div class="ov-title">GAME OVER</div>
+            <div class="ov-sub" id="overSub"></div>
+            <button class="ov-btn" id="restartBtn2">CHƠI LẠI</button>
+          </div>
         </div>
         <div class="mute" id="mute" title="Bật/tắt âm">🔊</div>
       </div>

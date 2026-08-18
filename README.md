@@ -26,6 +26,13 @@ Giao diện "máy điện tử băng" cổ điển · lấy cảm hứng từ Ba
 - ⭐ **6 vật phẩm**, 🤖 **4 loại xe địch**, 🧱 địa hình gạch/thép/nước/cây.
 - 🕹️ **Demo 1 người chơi ngay trên GitHub Pages** — chạy engine client-side, không cần server.
 
+## 🔗 Phòng chơi & link mời
+- Người chơi 1 bấm **TẠO PHÒNG MỚI** → nhận **mã phòng 4 ký tự** + **link mời** (kèm nút Copy).
+- Gửi link (dạng `.../?room=XXXX`) cho người chơi 2 → họ mở link, nhập tên, bấm **VÀO** là vào đúng phòng đó.
+- Mỗi phòng là một trận riêng biệt, tối đa **4 người**; người mới có thể nhập bất cứ lúc nào.
+- Mã phòng cũng hiển thị trên đầu màn hình — bấm vào để copy link mời nhanh.
+- Phòng trống sẽ tự xoá sau ~60 giây.
+
 ## 🚀 Chạy bản co-op (nhiều người, cùng Wi-Fi)
 
 ```bash
