@@ -29,19 +29,21 @@ let myRoom = null;        // room code once joined
 const netEl = document.getElementById('net');
 const overlay = document.getElementById('overlay');
 const ovMenu = document.getElementById('ovMenu');
-const ovInvite = document.getElementById('ovInvite');
+const ovWait = document.getElementById('ovWait');
 const ovOver = document.getElementById('ovOver');
 const ovSub = document.getElementById('ovSub');
 const ovErr = document.getElementById('ovErr');
 const overSub = document.getElementById('overSub');
+const lobbyStat = document.getElementById('lobbyStat');
 const nameInput = document.getElementById('nameInput');
 const codeInput = document.getElementById('codeInput');
 const createBtn = document.getElementById('createBtn');
 const joinBtn = document.getElementById('joinBtn');
 const invCode = document.getElementById('invCode');
 const invLink = document.getElementById('invLink');
+const waitCount = document.getElementById('waitCount');
 const copyBtn = document.getElementById('copyBtn');
-const playBtn = document.getElementById('playBtn');
+const beginBtn = document.getElementById('beginBtn');
 const restartBtn2 = document.getElementById('restartBtn2');
 const roomChip = document.getElementById('roomChip');
 const hudStage = document.getElementById('hudStage');
@@ -68,7 +70,6 @@ function connect() {
   };
 }
 
-let pendingCreate = false;
 let overlayMode = 'menu';
 
 function handle(m) {
@@ -76,6 +77,9 @@ function handle(m) {
     case 'hello':
       TILE = m.tile; COLS = m.cols; ROWS = m.rows; FIELD_W = COLS * TILE; FIELD_H = ROWS * TILE;
       setupCanvases();
+      break;
+    case 'lobby':
+      updateLobbyStat(m);
       break;
     case 'map':
       setGrid(m.map); statusText = m.status; break;
@@ -102,19 +106,25 @@ function send(o) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stri
 function getName() { return (nameInput.value || '').trim(); }
 function showErr(msg) { ovErr.textContent = msg || ''; }
 
-function createRoom() { ensureAudio(); showErr(''); pendingCreate = true; send({ t: 'create', name: getName() }); }
+function createRoom() { ensureAudio(); showErr(''); send({ t: 'create', name: getName() }); }
 function joinRoom(code) {
   ensureAudio(); showErr('');
   const c = (code || '').toUpperCase().trim();
   if (c.length < 4) { showErr('Nhập mã phòng 4 ký tự.'); return; }
-  pendingCreate = false; send({ t: 'join', room: c, name: getName() });
+  send({ t: 'join', room: c, name: getName() });
+}
+
+function updateLobbyStat(m) {
+  let s = `🟢 ${m.rooms} phòng đang hoạt động · ${m.players} người chơi`;
+  if (m.waiting > 0) s += ` · ${m.waiting} phòng đang chờ`;
+  lobbyStat.textContent = s;
 }
 
 function onJoined(room) {
   history.replaceState(null, '', inviteLink(room));
   roomChip.textContent = `Phòng ${room} · 📋`;
   roomChip.classList.remove('hidden');
-  if (pendingCreate) showOverlay('invite');
+  if (statusText === 'waiting') showOverlay('waiting');
   else { overlayMode = null; overlay.classList.add('hidden'); }
 }
 
@@ -148,12 +158,13 @@ nameInput.addEventListener('keydown', e => {
   if (codeInput.value.trim() || roomParam) joinRoom(codeInput.value || roomParam); else createRoom();
 });
 copyBtn.addEventListener('click', copyInvite);
-playBtn.addEventListener('click', () => { overlayMode = null; overlay.classList.add('hidden'); });
+beginBtn.addEventListener('click', () => send({ t: 'begin' }));
 restartBtn2.addEventListener('click', () => send({ t: 'restart' }));
 roomChip.addEventListener('click', copyInvite);
 document.getElementById('startBtn').addEventListener('click', () => {
   ensureAudio();
   if (!joined) { if (codeInput.value.trim() || roomParam) joinRoom(codeInput.value || roomParam); else createRoom(); }
+  else if (statusText === 'waiting') send({ t: 'begin' });
   else if (statusText === 'gameover') send({ t: 'restart' });
   else copyInvite();
 });
@@ -480,8 +491,8 @@ function updateHud(m) {
 
 function updateOverlay() {
   if (!joined) { showOverlay('menu'); return; }
+  if (statusText === 'waiting') { showOverlay('waiting'); return; }
   if (statusText === 'gameover') { showOverlay('gameover'); return; }
-  if (overlayMode === 'invite') return; // keep invite panel until dismissed
   overlayMode = null;
   overlay.classList.add('hidden');
 }
@@ -490,9 +501,13 @@ function showOverlay(mode) {
   overlayMode = mode;
   overlay.classList.remove('hidden');
   ovMenu.classList.toggle('hidden', mode !== 'menu');
-  ovInvite.classList.toggle('hidden', mode !== 'invite');
+  ovWait.classList.toggle('hidden', mode !== 'waiting');
   ovOver.classList.toggle('hidden', mode !== 'gameover');
-  if (mode === 'invite') { invCode.textContent = myRoom; invLink.textContent = inviteLink(myRoom); }
+  if (mode === 'waiting') {
+    invCode.textContent = myRoom;
+    invLink.textContent = inviteLink(myRoom);
+    waitCount.textContent = latest ? latest.players.length : 1;
+  }
   if (mode === 'gameover') {
     const mine = latest && latest.players.find(p => p.slot === me);
     overSub.textContent = mine ? `Điểm của bạn: ${mine.score}` : 'Căn cứ đã thất thủ';

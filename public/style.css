@@ -93,6 +93,12 @@ body{
   background:#11131f; color:#e8ecff; border:1px solid #3a3f5c; padding:9px 16px; border-radius:10px;
   font-size:13px; font-weight:700; opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:50;}
 .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+.ov-stat{font-size:12px; color:#8fe3a0; background:rgba(87,196,81,.10); border:1px solid rgba(87,196,81,.25);
+  border-radius:8px; padding:4px 10px;}
+.ov-wait{font-size:14px; color:var(--accent); font-weight:700;}
+.ov-wait b{color:#fff;}
+.ov-wait .dots{animation:blink 1s steps(1) infinite;}
+@keyframes blink{50%{opacity:.25;}}
 
 .mute{position:absolute; top:6px; right:8px; font-size:15px; opacity:.75; z-index:6; cursor:pointer;}
 

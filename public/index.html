@@ -34,6 +34,7 @@
           <div class="ov-card" id="ovMenu">
             <div class="ov-title">TANK BATTLE 90</div>
             <div class="ov-sub" id="ovSub">Tạo phòng rồi mời bạn bè vào chơi co-op</div>
+            <div class="ov-stat" id="lobbyStat">🟢 0 phòng đang hoạt động</div>
             <input class="ov-input" id="nameInput" maxlength="12" placeholder="Tên của bạn" />
             <button class="ov-btn" id="createBtn">🎮 TẠO PHÒNG MỚI</button>
             <div class="ov-or">— hoặc vào phòng có sẵn —</div>
@@ -44,14 +45,15 @@
             <div class="ov-err" id="ovErr"></div>
             <div class="ov-hint">Bảo vệ đại bàng 🦅 · Diệt 20 xe địch · Bắn xe nhấp nháy nhận vật phẩm</div>
           </div>
-          <!-- INVITE: shown right after creating a room -->
-          <div class="ov-card hidden" id="ovInvite">
+          <!-- WAITING ROOM: shown after creating a room, until player 2 joins or host starts -->
+          <div class="ov-card hidden" id="ovWait">
             <div class="ov-title">Phòng <span id="invCode" class="inv-code">----</span></div>
+            <div class="ov-wait" id="ovWaitMsg"><span class="dots">⏳</span> Đang đợi người chơi… <b id="waitCount">1</b>/4</div>
             <div class="ov-sub">Gửi link này cho người chơi thứ 2:</div>
             <div class="ov-link" id="invLink"></div>
             <button class="ov-btn" id="copyBtn">📋 Copy link mời</button>
-            <button class="ov-btn ghost" id="playBtn">▶ VÀO TRẬN</button>
-            <div class="ov-hint">Người chơi mới có thể vào bất cứ lúc nào (tối đa 4 người).</div>
+            <button class="ov-btn ghost" id="beginBtn">▶ BẮT ĐẦU NGAY</button>
+            <div class="ov-hint">Trận tự bắt đầu khi người chơi thứ 2 vào (tối đa 4 người).</div>
           </div>
           <!-- GAME OVER -->
           <div class="ov-card hidden" id="ovOver">

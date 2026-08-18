@@ -182,8 +182,14 @@ class Game {
       tankId: null, respawnAt: 0, connected: true,
     };
     this.players.set(slot, p);
-    if (this.status === 'lobby') this.startGame();
-    else if (this.status === 'playing') this.spawnPlayer(p, true);
+    if (this.status === 'lobby') {
+      this.status = 'waiting';                        // first player waits in the room lobby
+    } else if (this.status === 'waiting') {
+      if (this.players.size >= 2) this.startGame();   // 2nd player arriving auto-starts the match
+    } else if (this.status === 'playing') {
+      this.spawnPlayer(p, true);                      // late joiner drops into the running match
+    }
+    // (stageclear: the player is spawned on the next loadStage)
     return p;
   }
 
@@ -517,7 +523,7 @@ class Game {
     this.events = [];
     this.mapDelta = [];
 
-    if (this.status === 'lobby' || this.status === 'gameover') {
+    if (this.status === 'lobby' || this.status === 'waiting' || this.status === 'gameover') {
       return; // frozen; still broadcast for overlay/animation
     }
 

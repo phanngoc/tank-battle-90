@@ -40,8 +40,9 @@ function startDemo() {
   ensureAudio();
   if (!game) {
     game = new Game();
-    const p = game.addPlayer('YOU');   // status lobby -> startGame() -> loadStage(1)
+    const p = game.addPlayer('YOU');
     me = p.slot;
+    if (game.status === 'waiting') game.startGame(); // demo is single-player: start immediately
   } else {
     game.restart();
   }

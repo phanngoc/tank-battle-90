@@ -57,10 +57,26 @@ function sendInit(ws, g) {
   });
 }
 
+function lobbyStats() {
+  let players = 0, waiting = 0, active = 0;
+  for (const [code, g] of rooms) {
+    if (roomClients(code).length === 0) continue;
+    active++;
+    players += g.players.size;
+    if (g.status === 'waiting') waiting++;
+  }
+  return { t: 'lobby', rooms: active, waiting, players };
+}
+function broadcastLobby() {
+  const msg = JSON.stringify(lobbyStats());
+  for (const ws of wss.clients) if (ws.room == null && ws.readyState === ws.OPEN) ws.send(msg);
+}
+
 wss.on('connection', (ws) => {
   ws.slot = null;
   ws.room = null;
   send(ws, { t: 'hello', cols: COLS, rows: ROWS, tile: TILE });
+  send(ws, lobbyStats()); // initial active-rooms count for the menu
 
   ws.on('message', (raw) => {
     let msg; try { msg = JSON.parse(raw); } catch { return; }
@@ -93,6 +109,12 @@ wss.on('connection', (ws) => {
         p.ctrl = { dir, moving: !!msg.moving, fire: !!msg.fire };
         break;
       }
+      case 'begin': {
+        const g = rooms.get(ws.room);
+        if (!g) return;
+        if (g.status === 'waiting') g.startGame(); // creator starts without waiting for others
+        break;
+      }
       case 'restart': {
         const g = rooms.get(ws.room);
         if (!g) return;
@@ -115,7 +137,9 @@ wss.on('connection', (ws) => {
 
 // ---- game loop (all rooms) ----
 const STEP = 1000 / TICK_HZ;
+let statTick = 0;
 setInterval(() => {
+  if (++statTick % 15 === 0) broadcastLobby(); // ~2x/sec update menu room counter
   for (const [code, g] of rooms) {
     const clients = roomClients(code);
     if (clients.length === 0) {
