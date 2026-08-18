@@ -40,7 +40,9 @@ const muteEl = document.getElementById('mute');
 // =====================================================================
 let ws = null;
 function connect() {
-  ws = new WebSocket(`ws://${location.host}`);
+  // wss:// when served over HTTPS (e.g. via Cloudflare Tunnel) to avoid mixed-content blocking
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  ws = new WebSocket(`${proto}${location.host}`);
   ws.onopen = () => { netEl.textContent = '• online'; netEl.classList.add('on'); };
   ws.onclose = () => { netEl.textContent = '• reconnecting…'; netEl.classList.remove('on'); setTimeout(connect, 1000); };
   ws.onmessage = (ev) => {
