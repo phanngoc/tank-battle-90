@@ -1,0 +1,13 @@
+{
+  "name": "tank-battle-90",
+  "version": "1.0.0",
+  "description": "Co-op realtime multiplayer tank game (browser + mobile), classic handheld style. Original implementation inspired by the classic tank genre.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}
