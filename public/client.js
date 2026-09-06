@@ -60,66 +60,129 @@ const roomParam = new URLSearchParams(location.search).get('room');
 function inviteLink(code) { return `${location.origin}${location.pathname}?room=${code}`; }
 
 // =====================================================================
-// Networking
+// Networking — chạy trên Arcade SDK.
+//
+// Trước đây phần này tự mở WebSocket, tự reconnect, tự phân giải 6 loại
+// message và tự quản mã phòng. Giờ SDK lo hết; ở đây chỉ còn hai việc:
+//   1. gọi rooms.create/join
+//   2. đổi state của platform về ĐÚNG hình dạng mà renderer cũ đang dùng
+// Renderer, âm thanh, nội suy chuyển động: không đổi một dòng.
 // =====================================================================
-let ws = null;
-function connect() {
-  // wss:// when served over HTTPS (e.g. via Cloudflare Tunnel) to avoid mixed-content blocking
-  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-  ws = new WebSocket(`${proto}${location.host}`);
-  ws.onopen = () => { netEl.textContent = '• online'; netEl.classList.add('on'); };
-  ws.onclose = () => { netEl.textContent = '• reconnecting…'; netEl.classList.remove('on'); setTimeout(connect, 1000); };
-  ws.onmessage = (ev) => {
-    let m; try { m = JSON.parse(ev.data); } catch { return; }
-    handle(m);
+let arcade = null;      // client SDK
+let room = null;        // phòng hiện tại
+let pendingEffects = []; // effects sống một tick, tới qua event
+
+function setNet(on, label) {
+  netEl.textContent = label;
+  netEl.classList.toggle('on', !!on);
+}
+
+async function connect() {
+  setNet(false, '• đang kết nối…');
+  try {
+    arcade = await window.Arcade.init({ gameId: 'tank-battle' });
+    setNet(false, '• sẵn sàng');
+  } catch (e) {
+    setNet(false, '• offline');
+    setTimeout(connect, 2000);
+  }
+}
+
+/** Platform dùng object theo id (xoá 1 thực thể = 1 op thay vì dịch cả mảng).
+ *  Renderer cũ cần mảng -> đổi lại ở đây, ngay trước khi vẽ. */
+function toLegacy(s) {
+  if (!s) return null;
+  var tanks = [], bullets = [], players = [], k;
+  for (k in s.tanks) tanks.push(s.tanks[k]);
+  for (k in s.bullets) bullets.push(s.bullets[k]);
+  for (k in s.players) players.push(s.players[k]);
+  players.sort(function (a, b) { return a.slot - b.slot; });
+  return {
+    t: 'state', tick: s.tick, stage: s.stage, status: s.status, frozen: s.frozen,
+    tanks: tanks, bullets: bullets, powerups: s.powerups || [],
+    effects: pendingEffects, players: players,
+    enemiesLeft: s.enemiesLeft, base: s.base, events: [], mapDelta: [],
   };
 }
 
 let overlayMode = 'menu';
+let lastMapKey = '';
 
-function handle(m) {
-  switch (m.t) {
-    case 'hello':
-      TILE = m.tile; COLS = m.cols; ROWS = m.rows; FIELD_W = COLS * TILE; FIELD_H = ROWS * TILE;
+function wireRoom(r) {
+  room = r;
+  myRoom = r.code;
+  joined = true;
+  setNet(true, '• online');
+
+  r.onStatus(function (st) {
+    if (st === 'connected') setNet(true, '• online');
+    else if (st === 'reconnecting') setNet(false, '• đang nối lại…');
+    else setNet(false, '• đã thoát');
+  });
+
+  // Slot của mình do room module gửi riêng cho từng người.
+  r.onEvent('you', function (d) { me = d.slot; });
+  r.onEvent('fx', function (list) { for (var i = 0; i < list.length; i++) playSfx(list[i]); });
+  r.onEvent('mapDelta', function (list) { for (var i = 0; i < list.length; i++) applyDelta(list[i].x, list[i].y, list[i].t); });
+  r.onEvent('effects', function (list) { pendingEffects = list || []; });
+  r.onError(function (e) {
+    showErr(e.code === 'ROOM_FULL' ? 'Phòng đã đủ 4 người.'
+      : e.code === 'ROOM_NOT_FOUND' ? 'Không tìm thấy phòng.' : (e.msg || e.code));
+  });
+
+  r.onState(function (s) {
+    if (s.dims && !canvasReady) {
+      canvasReady = true;
+      TILE = s.dims.tile; COLS = s.dims.cols; ROWS = s.dims.rows;
+      FIELD_W = COLS * TILE; FIELD_H = ROWS * TILE;
       setupCanvases();
-      break;
-    case 'lobby':
-      updateLobbyStat(m);
-      break;
-    case 'map':
-      setGrid(m.map); statusText = m.status; break;
-    case 'init':
-      me = m.you; joined = true; myRoom = m.room;
-      setGrid(m.map); statusText = m.status;
-      onJoined(m.room);
-      break;
-    case 'nojoin':
-      showErr(m.reason === 'full' ? `Phòng ${m.room} đã đủ 4 người.` : `Không tìm thấy phòng ${m.room}.`);
-      break;
-    case 'state':
-      latest = m; statusText = m.status;
-      for (const d of m.mapDelta) applyDelta(d.x, d.y, d.t);
-      if (m.events && m.events.length) for (const e of m.events) playSfx(e);
-      snaps.push({ t: performance.now(), s: m });
-      while (snaps.length > 12) snaps.shift();
-      updateHud(m);
-      updateOverlay();
-      break;
+    }
+    // Bản đồ chỉ đổi khi qua màn -> so khoá thay vì dựng lại lưới mỗi frame.
+    var mk = s.stage + ':' + s.status;
+    if (s.map && mk !== lastMapKey) { lastMapKey = mk; setGrid(s.map); }
+
+    statusText = s.status;
+    var legacy = toLegacy(s);
+    latest = legacy;
+    pendingEffects = [];
+    snaps.push({ t: performance.now(), s: legacy });
+    while (snaps.length > 12) snaps.shift();
+    updateHud(legacy);
+    updateOverlay();
+    if (!onJoinedDone) { onJoinedDone = true; onJoined(r.code); }
+  });
+}
+let onJoinedDone = false;
+let canvasReady = false;
+
+async function createRoom() {
+  ensureAudio(); showErr('');
+  try { wireRoom(await arcade.rooms.create('coop', undefined, getName())); }
+  catch (e) { showErr('Không tạo được phòng: ' + e.message); }
+}
+
+async function joinRoom(code) {
+  ensureAudio(); showErr('');
+  var c = (code || '').toUpperCase().trim();
+  if (c.length < 4) { showErr('Nhập mã phòng 4 ký tự.'); return; }
+  try { wireRoom(await arcade.rooms.join(c, getName())); }
+  catch (e) {
+    showErr(e.message === 'ROOM_FULL' ? 'Phòng ' + c + ' đã đủ 4 người.'
+      : 'Không tìm thấy phòng ' + c + '.');
   }
 }
 
-function send(o) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(o)); }
+/** Thay cho send() cũ. Mọi input đi qua đây. */
+function send(o) {
+  if (!room) return;
+  if (o.t === 'ctrl') room.send('input', { dir: o.dir, moving: o.moving, fire: o.fire });
+  else if (o.t === 'begin' || o.t === 'restart') room.send('start');
+}
 
 function getName() { return (nameInput.value || '').trim(); }
 function showErr(msg) { ovErr.textContent = msg || ''; }
 
-function createRoom() { ensureAudio(); showErr(''); send({ t: 'create', name: getName() }); }
-function joinRoom(code) {
-  ensureAudio(); showErr('');
-  const c = (code || '').toUpperCase().trim();
-  if (c.length < 4) { showErr('Nhập mã phòng 4 ký tự.'); return; }
-  send({ t: 'join', room: c, name: getName() });
-}
+// (joinRoom định nghĩa ở phần Networking phía trên — bản dùng SDK)
 
 function updateLobbyStat(m) {
   let s = `🟢 ${m.rooms} phòng đang hoạt động · ${m.players} người chơi`;

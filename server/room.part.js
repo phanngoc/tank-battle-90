@@ -62,6 +62,9 @@ module.exports = {
 
   initialState: function () {
     return {
+      // dims thay cho message 'hello' của server cũ: client cần TILE/COLS/ROWS
+      // để dựng canvas. Nằm trong state nên chỉ tốn băng thông đúng một lần.
+      dims: { tile: TILE, cols: COLS, rows: ROWS },
       tick: 0, stage: 1, status: 'lobby', frozen: 0, enemiesLeft: 0,
       tanks: {}, bullets: {}, players: {}, powerups: [],
       base: { x: 0, y: 0, alive: true },
