@@ -90,3 +90,34 @@ Server là *authoritative*: client chỉ gửi input (hướng + bắn) và vẽ
 
 ## 📄 License
 [MIT](LICENSE) © phanngoc · Đồ hoạ & code **nguyên bản**; gameplay lấy cảm hứng từ dòng game bắn tăng 2D cổ điển.
+
+## Chạy trên platform Arcade
+
+Bản port sang [arcade-platform](https://github.com/phanngoc/arcade-platform): toàn bộ
+netcode viết tay được thay bằng một **room module**.
+
+| | Trước | Sau |
+|---|---|---|
+| `server.js` | 193 dòng: HTTP tĩnh, WebSocket, sổ phòng, sinh mã, thu hồi phòng trống, vòng lặp, broadcast | platform lo hết |
+| `game.js` | 645 dòng gameplay | **không đổi một dòng** |
+| `server/room.part.js` | — | ~130 dòng ánh xạ engine ↔ hook |
+
+```bash
+node server/build-room.js   # ghép game.js + room.part.js -> server/room.js
+```
+Sandbox không có `require`, nên engine phải nằm cùng file với room module.
+Chạy lại lệnh trên mỗi khi sửa `game.js`.
+
+**Ba điều học được khi port:**
+
+1. **`tanks`/`bullets` là object theo id, không phải mảng.** Platform diff mảng theo chỉ số
+   (không LCS — quá đắt ở 30Hz), nên xoá một viên đạn ở giữa mảng làm mọi phần tử sau dịch
+   chỗ và patch to bằng cả mảng. Object keyed-by-id thì xoá = một op.
+2. **`events`/`mapDelta`/`effects` gửi bằng `room.broadcast()`, không nằm trong state** —
+   chúng chỉ sống một tick; để trong state thì mỗi tick sinh 2 op cho thứ không phải state.
+3. **Input của client phải kiểm tra.** `dir` ngoài khoảng 0..3 làm `DIR[tank.dir]` undefined,
+   engine ném lỗi, platform thu hồi cả phòng — một client hỏng đá văng cả trận của người khác.
+
+Đo được ở 100 CCU (25 phòng × 4 người): **462 CCU/vCPU, tick p99 0,99ms, 5,3 KB/s mỗi người.**
+
+`server.js` vẫn giữ để chạy độc lập (bản đang live tại tank.bomclaw.org dùng nó).
