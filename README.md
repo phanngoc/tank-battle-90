@@ -22,7 +22,7 @@ Giao diện "máy điện tử băng" cổ điển · lấy cảm hứng từ Ba
 ## ✨ Tính năng
 - 🎮 **Giao diện máy điện tử băng**: màn hình LCD (có scanline) ở trên, D-pad + nút BẮN cỡ lớn ở dưới — tối ưu cảm ứng.
 - 🌐 **Co-op realtime tới 4 người** qua WebSocket; server giữ trạng thái chuẩn (*authoritative*).
-- 🦅 **Bảo vệ đại bàng**, diệt 20 xe địch/màn qua 3 màn địa hình khác nhau.
+- 🦅 **Bảo vệ đại bàng**, diệt 20–38 xe địch/màn (tăng theo số người) qua 3 màn địa hình khác nhau.
 - ⭐ **6 vật phẩm**, 🤖 **4 loại xe địch**, 🧱 địa hình gạch/thép/nước/cây.
 - 🕹️ **Demo 1 người chơi ngay trên GitHub Pages** — chạy engine client-side, không cần server.
 
@@ -55,7 +55,9 @@ Mở URL trên **nhiều thiết bị** → tất cả vào chung một trận c
 | **Máy tính** | mũi tên / **WASD** | **Space / Enter** | **START** |
 
 ## 📜 Luật chơi
-- Tiêu diệt toàn bộ **20 xe địch** mỗi màn để qua màn.
+- Tiêu diệt toàn bộ xe địch mỗi màn để qua màn. Số địch tính theo số người **n** lúc bắt đầu màn:
+  **20 + 6(n−1)** xe/màn, tối đa **min(8, 2+2n)** xe cùng lúc (1P: 20/4 · 2P: 26/6 · 3P: 32/8 · 4P: 38/8).
+- **Bắn đồng đội** (mặc định BẬT, chủ phòng đổi ở phòng chờ): đạn trúng đồng đội làm xe đó **choáng 2 giây** (không chạy, không bắn), không mất mạng. Khiên chặn choáng.
 - **Bảo vệ đại bàng 🦅** ở căn cứ (giữa dưới). Đại bàng bị bắn = thua ngay.
 - Mỗi người **3 mạng**. Hết mạng của tất cả HOẶC đại bàng bị phá = Game Over.
 - Gạch vỡ được; **thép** chỉ phá khi lên sao tối đa; **nước** chặn xe (đạn bay qua); **cây** che khuất xe.
@@ -68,7 +70,7 @@ Mở URL trên **nhiều thiết bị** → tất cả vào chung một trận c
 | ⛏️ Xẻng | Tường quanh căn cứ hoá thép ~15 giây |
 | 💣 Lựu đạn | Tiêu diệt tất cả địch đang trên bản đồ |
 | 🛡️ Mũ giáp | Khiên bất tử tạm thời ~10 giây |
-| 🚗 Xe tăng | +1 mạng cho người nhặt |
+| 🚗 Xe tăng | **Hồi sinh** một đồng đội đã hết mạng (1 mạng); không ai bị loại thì +1 mạng cho người nhặt |
 
 ## 🤖 Loại xe địch
 **Basic** (xám) · **Fast** (xanh, đi nhanh) · **Power** (đỏ, bắn nhanh) · **Armor** (đổi màu, chịu 4 phát). Xe **nhấp nháy hồng** mang vật phẩm.

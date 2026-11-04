@@ -25,9 +25,18 @@ const UP = 0, RIGHT = 1, DOWN = 2, LEFT = 3;
 
 const PLAYER_COLORS = ['#f2d024', '#57c451', '#3fb7d6', '#e07b34']; // p1 yellow, p2 green, p3 cyan, p4 orange
 const START_LIVES = 3;
-const ENEMIES_PER_STAGE = 20;
-const MAX_ACTIVE_ENEMIES = 4;
-const BONUS_INDICES = [3, 10, 17]; // spawn order (0-based) that carries a power-up
+// Enemy pressure scales with the squad (n = players in the room at stage start):
+//   per stage: 20 + 6(n-1)  -> 20 / 26 / 32 / 38
+//   on field:  min(8, 2+2n) -> 4 / 6 / 8 / 8
+const ENEMIES_BASE = 20, ENEMIES_PER_EXTRA_PLAYER = 6;
+const MAX_ACTIVE_CAP = 8;
+function stageEnemyCount(n) { n = Math.max(1, n | 0); return ENEMIES_BASE + ENEMIES_PER_EXTRA_PLAYER * (n - 1); }
+function maxActiveEnemies(n) { n = Math.max(1, n | 0); return Math.min(MAX_ACTIVE_CAP, 2 + 2 * n); }
+// Spawn order (0-based) that carries a power-up: 3, 10, 17, 24, 31 … (solo: 3/10/17 as before)
+function isBonusIndex(i) { return i % 7 === 3; }
+
+// Friendly fire: a teammate's bullet stuns instead of killing.
+const STUN_TICKS = 2 * TICK_HZ;
 
 const ENEMY_TEMPLATE = {
   basic: { speed: 1, hp: 1, bulletSpeed: 4, score: 100, fireProb: 0.020, tclass: 0 },
@@ -121,9 +130,9 @@ function buildGrid(mapIdx) {
   return grid;
 }
 
-function buildQueue(stage) {
+function buildQueue(stage, count) {
   const q = [];
-  for (let i = 0; i < ENEMIES_PER_STAGE; i++) {
+  for (let i = 0; i < count; i++) {
     const r = (i * 7 + stage * 3) % 10;
     let t;
     if (stage >= 3 && r < 2) t = 'armor';
@@ -159,6 +168,8 @@ class Game {
     this.baseWalls = [];       // {c,r} tiles that are part of base defense
     this.baseSteelUntil = 0;
     this.stageClearAt = 0;
+    this.maxActive = maxActiveEnemies(1);
+    this.friendlyFire = true;  // room option, toggled from the waiting room
   }
 
   nextId() { return this.idCounter++; }
@@ -222,7 +233,10 @@ class Game {
     this.bullets = [];
     this.powerups = [];
     this.effects = [];
-    this.enemyQueue = buildQueue(stage);
+    // squad size is locked in at stage start; late joiners raise it next stage
+    const n = this.players.size;
+    this.enemyQueue = buildQueue(stage, stageEnemyCount(n));
+    this.maxActive = maxActiveEnemies(n);
     this.spawnedCount = 0;
     this.spawnCooldown = TICK_HZ; // 1s before first enemy
     this.spawnPointIdx = 0;
@@ -254,7 +268,7 @@ class Game {
       x, y, w: TANK, h: TANK, dir: UP, moving: false, speed: 2,
       bulletSpeed: lvl >= 1 ? 8 : 6, maxBullets: lvl >= 2 ? 2 : 1,
       canDestroySteel: lvl >= 3, fireCooldown: 8, cooldown: 0,
-      hp: 1, spawnUntil: 0, shieldUntil: 0, dead: false, blocked: false,
+      hp: 1, spawnUntil: 0, shieldUntil: 0, stunUntil: 0, dead: false, blocked: false,
     };
   }
 
@@ -338,7 +352,7 @@ class Game {
 
   trySpawnEnemy() {
     if (this.enemyQueue.length === 0) return;
-    if (this.activeEnemies() >= MAX_ACTIVE_ENEMIES) return;
+    if (this.activeEnemies() >= this.maxActive) return;
     if (this.spawnCooldown > 0) { this.spawnCooldown--; return; }
     const sp = ENEMY_SPAWN[this.spawnPointIdx % ENEMY_SPAWN.length];
     // don't spawn on top of an existing tank
@@ -346,7 +360,7 @@ class Game {
     if (occupied) { this.spawnCooldown = 8; return; }
     const type = this.enemyQueue.shift();
     const tpl = ENEMY_TEMPLATE[type];
-    const isBonus = BONUS_INDICES.includes(this.spawnedCount);
+    const isBonus = isBonusIndex(this.spawnedCount);
     const speed = tpl.speed + (this.stage >= 4 ? 1 : 0);
     this.tanks.push({
       id: this.nextId(), kind: 'enemy', enemyType: type, tclass: tpl.tclass,
@@ -417,10 +431,13 @@ class Game {
   bulletHitsTank(b) {
     for (const t of this.tanks) {
       if (t.dead || t.id === b.ownerId) continue;
-      if (t.kind === b.ownerKind) continue; // no friendly fire
+      const friendly = t.kind === b.ownerKind;
+      // enemies never hurt each other; players only stun each other, and only with the option on
+      if (friendly && (t.kind !== 'player' || !this.friendlyFire)) continue;
       if (t.spawnUntil > this.tick) continue; // invulnerable while spawning
       if (b.x < t.x + t.w && b.x + b.w > t.x && b.y < t.y + t.h && b.y + b.h > t.y) {
-        if (t.kind === 'player') this.damagePlayer(t);
+        if (friendly) this.stunPlayer(t);
+        else if (t.kind === 'player') this.damagePlayer(t);
         else this.damageEnemy(t, b);
         return true;
       }
@@ -439,6 +456,13 @@ class Game {
     const owner = this.players.get(this.tanks.find(k => k.id === b.ownerId)?.slot);
     if (owner) owner.score += t.score || 100;
     if (t.bonus) this.spawnPowerup(t.x, t.y);
+  }
+
+  stunPlayer(t) {
+    if (t.shieldUntil > this.tick) return; // helmet / respawn shield also blocks stun
+    t.stunUntil = this.tick + STUN_TICKS;
+    t.moving = false;
+    this.emit('stun');
   }
 
   damagePlayer(t) {
@@ -493,9 +517,15 @@ class Game {
         for (const w of this.baseWalls) this.setTile(w.c, w.r, STEEL);
         this.baseSteelUntil = this.tick + Math.round(TICK_HZ * 15);
         break;
-      case 'tank':
-        if (p) p.lives++;
+      case 'tank': {
+        // revive an eliminated teammate first; only if nobody is out is it a plain extra life
+        const out = [...this.players.values()]
+          .filter(q => q !== p && q.lives <= 0 && q.tankId == null)
+          .sort((a, b) => a.slot - b.slot)[0];
+        if (out) { out.lives = 1; out.respawnAt = 0; this.spawnPlayer(out, true); this.emit('revive'); }
+        else if (p) p.lives++;
         break;
+      }
       case 'helmet':
         playerTank.shieldUntil = this.tick + Math.round(TICK_HZ * 10);
         break;
@@ -555,7 +585,7 @@ class Game {
     for (const p of this.players.values()) {
       const t = p.tankId != null ? this.tanks.find(k => k.id === p.tankId) : null;
       if (!t || t.dead) continue;
-      if (t.spawnUntil > this.tick) { t.moving = false; continue; }
+      if (t.spawnUntil > this.tick || t.stunUntil > this.tick) { t.moving = false; continue; }
       if (p.ctrl.moving) { this.setDir(t, p.ctrl.dir); t.moving = true; }
       else t.moving = false;
       this.moveTank(t);
@@ -616,6 +646,7 @@ class Game {
       x: t.x, y: t.y, d: t.dir,
       sp: t.spawnUntil > this.tick ? 1 : 0,
       sh: t.shieldUntil > this.tick ? 1 : 0,
+      st: t.stunUntil > this.tick ? 1 : 0,
       et: t.enemyType || '', tc: t.tclass ?? -1, bo: t.bonus ? 1 : 0,
       hp: t.hp, mh: t.maxHp || 1,
     }));
@@ -626,7 +657,7 @@ class Game {
       slot: p.slot, name: p.name, color: p.color, lives: p.lives, level: p.level, score: p.score,
     })).sort((a, b) => a.slot - b.slot);
     return {
-      t: 'state', tick: this.tick, stage: this.stage, status: this.status,
+      t: 'state', tick: this.tick, stage: this.stage, status: this.status, friendlyFire: this.friendlyFire,
       frozen: this.tick < this.freezeUntil ? 1 : 0,
       tanks, bullets, powerups, effects, players,
       enemiesLeft: this.enemiesRemaining(),

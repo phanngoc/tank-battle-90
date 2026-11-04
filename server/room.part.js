@@ -35,6 +35,7 @@ function writeState(room) {
   st.frozen = s.frozen;
   st.enemiesLeft = s.enemiesLeft;
   st.base = s.base;
+  st.friendlyFire = s.friendlyFire;
 
   // keyed-by-id: xoá một thực thể = một op delete, không dịch cả mảng
   var tanks = {}, i;
@@ -65,11 +66,17 @@ module.exports = {
       // dims thay cho message 'hello' của server cũ: client cần TILE/COLS/ROWS
       // để dựng canvas. Nằm trong state nên chỉ tốn băng thông đúng một lần.
       dims: { tile: TILE, cols: COLS, rows: ROWS },
-      tick: 0, stage: 1, status: 'lobby', frozen: 0, enemiesLeft: 0,
+      tick: 0, stage: 1, status: 'lobby', frozen: 0, enemiesLeft: 0, friendlyFire: true,
       tanks: {}, bullets: {}, players: {}, powerups: [],
       base: { x: 0, y: 0, alive: true },
       map: game.fullMap(),
     };
+  },
+
+  // opts của rooms.create(mode, opts): cho phép tạo phòng với { friendlyFire: false }
+  onCreate: function (room, opts) {
+    if (opts && typeof opts.friendlyFire === 'boolean') game.friendlyFire = opts.friendlyFire;
+    room.state.friendlyFire = game.friendlyFire;
   },
 
   onJoin: function (room, player) {
@@ -102,6 +109,17 @@ module.exports = {
         if (d.dir === 0 || d.dir === 1 || d.dir === 2 || d.dir === 3) p.ctrl.dir = d.dir;
         if (typeof d.moving === 'boolean') p.ctrl.moving = d.moving;
         if (typeof d.fire === 'boolean') p.ctrl.fire = d.fire;
+      }
+    } else if (type === 'option') {
+      // Tuỳ chọn phòng: chỉ đổi ngoài trận (phòng chờ / game over) và chỉ
+      // người giữ slot nhỏ nhất (chủ phòng; tự chuyển khi chủ rời đi).
+      if (game.status === 'playing' || game.status === 'stageclear') return;
+      var minSlot = 99;
+      game.players.forEach(function (q) { if (q.slot < minSlot) minSlot = q.slot; });
+      if (slot !== minSlot) return;
+      if (d && typeof d.friendlyFire === 'boolean') {
+        game.friendlyFire = d.friendlyFire;
+        writeState(room);
       }
     } else if (type === 'start') {
       if (game.status === 'waiting') game.startGame();

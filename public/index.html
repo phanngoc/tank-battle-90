@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <meta name="theme-color" content="#1c1f2b" />
 <title>TANK BATTLE 90</title>
-<link rel="stylesheet" href="style.css?v=6" />
+<link rel="stylesheet" href="style.css?v=7" />
 </head>
 <body>
   <div class="console" id="console">
@@ -43,7 +43,7 @@
               <button class="ov-btn ghost" id="joinBtn">VÀO</button>
             </div>
             <div class="ov-err" id="ovErr"></div>
-            <div class="ov-hint">Bảo vệ đại bàng 🦅 · Diệt 20 xe địch · Bắn xe nhấp nháy nhận vật phẩm</div>
+            <div class="ov-hint">Bảo vệ đại bàng 🦅 · Diệt 20+ xe địch (đông người càng nhiều) · Bắn xe nhấp nháy nhận vật phẩm</div>
           </div>
           <!-- WAITING ROOM: shown after creating a room, until player 2 joins or host starts -->
           <div class="ov-card" id="ovWait" style="display:none">
@@ -53,6 +53,7 @@
             <div class="ov-link" id="invLink"></div>
             <button class="ov-btn" id="copyBtn">📋 Copy link mời</button>
             <button class="ov-btn ghost" id="beginBtn">▶ BẮT ĐẦU NGAY</button>
+            <button class="ov-btn ghost ff" id="ffBtn" title="Đạn trúng đồng đội: choáng 2 giây">🎯 Bắn đồng đội: BẬT</button>
             <div class="ov-hint">Trận tự bắt đầu khi người chơi thứ 2 vào (tối đa 4 người).</div>
           </div>
           <!-- GAME OVER -->
@@ -89,6 +90,6 @@
 
   <script>window.ARCADE_GAME_ID = "tank-battle";</script>
   <script src="vendor/arcade.js"></script>
-  <script src="client.js?v=7"></script>
+  <script src="client.js?v=8"></script>
 </body>
 </html>
