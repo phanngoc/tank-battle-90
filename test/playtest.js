@@ -319,6 +319,18 @@ async function waitFor(cdp, expr, ms) {
       const fired = await waitFor(cdp, `latest && latest.bullets.length > 0`, 1500);
       gate('bấm BẮN → có đạn trên màn', fired);
 
+      // luật b: server choáng xe mình -> client nhận cờ st, vẽ không lỗi, ◀ không chạy
+      const mine = room.r.game.tanks.find((t) => t.kind === 'player' && t.slot === 0);
+      mine.shieldUntil = 0; room.r.game.stunPlayer(mine);
+      const stunned = await waitFor(cdp, `latest && latest.tanks.some(t => t.k === 'p' && t.slot === me && t.st === 1)`, 2000);
+      const sx0 = await cdp.evaluate(myTank);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: btn.x, y: btn.y, button: 'left', clickCount: 1 });
+      await sleep(500);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: btn.x, y: btn.y, button: 'left', clickCount: 1 });
+      const sx1 = await cdp.evaluate(myTank);
+      gate('bị choáng → client thấy cờ st, ◀ không chạy', stunned && sx0 && sx1 && sx0.x === sx1.x, sx0 && sx1 ? `x ${sx0.x} → ${sx1.x}` : '');
+      await cdp.shot('/tmp/tank-playtest-stun.png');
+
       await sleep(2500);
       const enemiesSeen = await cdp.evaluate(`latest.tanks.filter(t => t.k === 'e').length`);
       gate('địch xuất hiện', enemiesSeen > 0, enemiesSeen + ' xe địch');
@@ -342,7 +354,7 @@ async function waitFor(cdp, expr, ms) {
     console.log('\n── KẾT QUẢ ' + '─'.repeat(41));
     const failed = results.filter((r) => !r.ok);
     console.log(`  ${results.length - failed.length}/${results.length} cổng pass`);
-    console.log('  ảnh: /tmp/tank-playtest-{menu,play}.png');
+    console.log('  ảnh: /tmp/tank-playtest-{menu,stun,play}.png');
     process.exitCode = failed.length ? 1 : 0;
   } catch (e) {
     console.error('\n❌ harness lỗi:', e.stack || e.message);

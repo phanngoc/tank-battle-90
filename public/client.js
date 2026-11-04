@@ -49,6 +49,8 @@ const invLink = document.getElementById('invLink');
 const waitCount = document.getElementById('waitCount');
 const copyBtn = document.getElementById('copyBtn');
 const beginBtn = document.getElementById('beginBtn');
+const ffBtn = document.getElementById('ffBtn');
+let friendlyFire = true;  // tuỳ chọn phòng, server là nguồn sự thật
 const restartBtn2 = document.getElementById('restartBtn2');
 const roomChip = document.getElementById('roomChip');
 const hudStage = document.getElementById('hudStage');
@@ -142,6 +144,7 @@ function wireRoom(r) {
     if (s.map && mk !== lastMapKey) { lastMapKey = mk; setGrid(s.map); }
 
     statusText = s.status;
+    if (typeof s.friendlyFire === 'boolean') friendlyFire = s.friendlyFire;
     var legacy = toLegacy(s);
     latest = legacy;
     pendingEffects = [];
@@ -177,6 +180,7 @@ function send(o) {
   if (!room) return;
   if (o.t === 'ctrl') room.send('input', { dir: o.dir, moving: o.moving, fire: o.fire });
   else if (o.t === 'begin' || o.t === 'restart') room.send('start');
+  else if (o.t === 'option') room.send('option', o.d);
 }
 
 function getName() { return (nameInput.value || '').trim(); }
@@ -229,6 +233,7 @@ nameInput.addEventListener('keydown', e => {
 });
 copyBtn.addEventListener('click', copyInvite);
 beginBtn.addEventListener('click', () => send({ t: 'begin' }));
+ffBtn.addEventListener('click', () => send({ t: 'option', d: { friendlyFire: !friendlyFire } }));
 restartBtn2.addEventListener('click', () => send({ t: 'restart' }));
 roomChip.addEventListener('click', copyInvite);
 document.getElementById('startBtn').addEventListener('click', () => {
@@ -463,6 +468,14 @@ function drawTank(t, tick, frozen, px, py) {
   const [dx, dy] = DIR[t.d];
   ctx.fillRect(cx + dx * 4 - 2, cy + dy * 4 - 2, 4 + Math.abs(dx) * 8, 4 + Math.abs(dy) * 8);
 
+  if (t.st) { // stunned by a teammate: blinking dim + orbiting stars
+    if (Math.floor(tick / 4) % 2) { ctx.fillStyle = 'rgba(20,24,40,0.45)'; ctx.fillRect(x, y, s, s); }
+    ctx.fillStyle = '#ffe14d';
+    for (let i = 0; i < 3; i++) {
+      const a = tick * 0.25 + i * 2.094;
+      ctx.fillRect(Math.round(x + s / 2 + Math.cos(a) * 11) - 2, Math.round(y + 4 + Math.sin(a) * 3) - 2, 4, 4);
+    }
+  }
   if (t.sh) { // shield
     const p = (Math.floor(tick / 3) % 2) ? '#8fdcff' : '#ffffff';
     ctx.strokeStyle = p; ctx.lineWidth = 2;
@@ -608,6 +621,11 @@ function showOverlay(mode) {
     invCode.textContent = myRoom;
     invLink.textContent = inviteLink(myRoom);
     waitCount.textContent = latest ? latest.players.length : 1;
+    // chỉ chủ phòng (slot nhỏ nhất) đổi được; server cũng chặn
+    const host = latest && latest.players.length ? latest.players[0].slot === me : true;
+    ffBtn.textContent = '🎯 Bắn đồng đội: ' + (friendlyFire ? 'BẬT (choáng 2s)' : 'TẮT');
+    ffBtn.classList.toggle('off', !friendlyFire);
+    ffBtn.disabled = !host;
   }
   if (mode === 'gameover') {
     const mine = latest && latest.players.find(p => p.slot === me);
@@ -721,6 +739,8 @@ function playSfx(e) {
     case 'levelup': tone(660, 0.06, 'square', 0.05); setTimeout(() => tone(880, 0.06, 'square', 0.05), 60); setTimeout(() => tone(1320, 0.08, 'square', 0.05), 120); break;
     case 'freeze': tone(160, 0.3, 'sine', 0.05); break;
     case 'spawn': tone(1000, 0.03, 'sine', 0.02); break;
+    case 'stun': tone(300, 0.12, 'triangle', 0.05); setTimeout(() => tone(240, 0.12, 'triangle', 0.05), 90); break;
+    case 'revive': tone(523, 0.08, 'square', 0.05); setTimeout(() => tone(784, 0.08, 'square', 0.05), 80); setTimeout(() => tone(1046, 0.12, 'square', 0.05), 160); break;
   }
 }
 

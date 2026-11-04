@@ -144,3 +144,7 @@ body{
 @media (max-width:360px){ .dpad{width:132px;height:132px;} .dbtn{width:44px;height:44px;}
   .up,.down{left:44px;} .left,.right{top:44px;} .dcenter{left:44px;top:44px;width:44px;height:44px;}
   .fire{width:84px;height:84px;} }
+
+.ov-btn.ff{font-size:13px; padding:8px 14px;}
+.ov-btn.ff.off{opacity:.7;}
+.ov-btn.ff:disabled{opacity:.5; cursor:default;}
