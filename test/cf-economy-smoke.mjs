@@ -69,7 +69,8 @@ const J = await ws(pick, guest.accessToken, { t: 'join', code: H.code, name: 'Ma
 await sleep(500);
 ok('đồng đội thấy xe + đạn của chủ phòng', J.state.cos['0'] && J.state.cos['0'].tank === 'tank.skin.neon' && J.state.cos['0'].bullet === 'tank.bullet.plasma', JSON.stringify(J.state.cos));
 ok('map của phòng = map chủ phòng', J.state.roomCos && J.state.roomCos.map === 'tank.map.neon', JSON.stringify(J.state.roomCos));
-await put('/v1/loadout', { slot: 'bullet', sku: null, room: H.code }, fan.accessToken); await sleep(400);
+await put('/v1/loadout', { slot: 'bullet', sku: null, room: H.code }, fan.accessToken);
+for (let i = 0; i < 30 && J.state.cos['0'] && J.state.cos['0'].bullet; i++) await sleep(200);
 ok('bỏ trang bị giữa phòng -> cập nhật', !J.state.cos['0'].bullet, JSON.stringify(J.state.cos));
 H.w.close(); J.w.close();
 process.exit();
