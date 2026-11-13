@@ -164,3 +164,31 @@ body{
 .shop-code { font-family: monospace; letter-spacing: 1px; }
 .shop-status { margin: 8px 0; }
 .ov-fest { display: block; font-size: 13px; margin: 4px 0; }
+/* ── Cửa hàng cosmetic v2: tab, xem trước, lưới món, bậc hiếm ── */
+.shop-wide { width: min(460px, 96vw); }
+.shop-tabs { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; margin: 6px 0; }
+.shop-tab { background: #262c3d; color: #cfd6ea; border: 1px solid #3a4258; border-radius: 6px; padding: 5px 8px; font-size: 12px; cursor: pointer; }
+.shop-tab.on { background: #ffd23f; color: #1d2230; border-color: #ffd23f; font-weight: 700; }
+.shop-pv { width: 320px; max-width: 88vw; aspect-ratio: 160 / 112; image-rendering: pixelated; border: 2px solid #3a4258; border-radius: 6px; background: #000; display: block; margin: 6px auto; }
+.shop-detail { min-height: 64px; margin: 4px 0 8px; }
+.shop-name { font-weight: 700; font-size: 15px; }
+.shop-desc { font-size: 12px; opacity: .8; margin-top: 2px; }
+.shop-actions { display: flex; gap: 6px; justify-content: center; margin-top: 6px; }
+.shop-actions .ov-btn { width: auto !important; padding: 6px 12px !important; margin: 0 !important; }
+.shop-have { color: #6fe08a; font-weight: 700; align-self: center; }
+.shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; margin-bottom: 8px; }
+.shop-tile { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px; background: #262c3d; color: #eef; border: 2px solid #3a4258; border-radius: 8px; cursor: pointer; font-size: 12px; }
+.shop-tile .ti { font-size: 20px; }
+.shop-tile .tn { font-weight: 600; line-height: 1.2; }
+.shop-tile .tp { opacity: .85; font-size: 11px; }
+.shop-tile.sel { outline: 2px solid #fff; }
+.shop-tile.own .tp { color: #6fe08a; }
+.shop-tile.eq { background: #2d3a2f; }
+.shop-empty { grid-column: 1 / -1; opacity: .7; padding: 10px; }
+.shop-slotrow { display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; border-bottom: 1px solid #2c3346; text-align: left; }
+.shop-slotrow .ov-btn { width: auto !important; padding: 2px 10px !important; margin: 0 !important; }
+.rar { font-size: 10px; padding: 1px 6px; border-radius: 4px; vertical-align: middle; color: #111; }
+.rar-common { background: #b7bcc8; } .rar-rare { background: #5aa9ff; } .rar-epic { background: #b57cff; } .rar-legendary { background: #ffae3a; }
+.rar-pass, .rar-room { background: #6fe0c8; } .rar-bundle { background: #ffd23f; }
+.rar-b-common { border-color: #7d8394; } .rar-b-rare { border-color: #3f86d6; } .rar-b-epic { border-color: #9b5cf0; } .rar-b-legendary { border-color: #ff9a1a; }
+.rar-b-bundle { border-color: #ffd23f; } .rar-b-pass, .rar-b-room { border-color: #3fbfa8; }
