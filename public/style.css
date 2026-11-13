@@ -148,3 +148,19 @@ body{
 .ov-btn.ff{font-size:13px; padding:8px 14px;}
 .ov-btn.ff.off{opacity:.7;}
 .ov-btn.ff:disabled{opacity:.5; cursor:default;}
+
+/* cửa hàng skin */
+.shop-modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.shop-card { background: #1d2230; color: #eef; border: 2px solid #3a4258; border-radius: 10px; padding: 14px; width: min(340px, 92vw); max-height: 92vh; overflow: auto; text-align: center; font-size: 14px; }
+.shop-title { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
+.shop-note { opacity: .7; font-size: 12px; margin-bottom: 8px; }
+.shop-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #2c3346; }
+.shop-item .sw { width: 18px; height: 18px; border-radius: 4px; flex: none; }
+.shop-item .nm { flex: 1; text-align: left; }
+.shop-item .pr { opacity: .85; }
+.shop-buy { width: auto !important; padding: 4px 10px !important; margin: 0 !important; }
+.shop-qr { width: 220px; max-width: 80vw; background: #fff; border-radius: 6px; margin: 6px auto; display: block; }
+.shop-sandbox { background: #c0392b; color: #fff; font-weight: 700; padding: 4px; border-radius: 4px; margin-bottom: 6px; }
+.shop-code { font-family: monospace; letter-spacing: 1px; }
+.shop-status { margin: 8px 0; }
+.ov-fest { display: block; font-size: 13px; margin: 4px 0; }

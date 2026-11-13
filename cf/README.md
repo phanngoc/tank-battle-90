@@ -37,3 +37,15 @@ Rollback một bản Worker lỗi (giữ route): `npx wrangler@4 rollback`.
 ## Chi phí
 Mỗi phòng có người = một DO chạy liên tục (~30 tin/s/người chiều ra; tin chiều vào tính như request).
 Phòng trống tự giải phóng sau 60s; rớt mạng giữ slot 15s để SDK `rejoin`.
+
+## Mỹ phẩm / thanh toán (D1 `tank-entitlements`)
+Chỉ trang trí — không SKU nào đổi chỉ số xe (`test/cosmetics.test.js` khẳng định engine giống hệt có/không skin).
+- Dev: `npm run dev:cf` (D1 local + `--local-upstream` để wsUrl không trỏ ra tank.bomclaw.org), rồi
+  `npm run smoke:cf` và `npm run smoke:cf:economy` (đơn → sandbox confirm → skin trong phòng, phòng lễ hội).
+- Deploy lần đầu:
+  1. `npx wrangler@4 d1 create tank-entitlements` → dán `database_id` vào wrangler.jsonc (thay REPLACE_AFTER_D1_CREATE)
+  2. `npx wrangler@4 d1 migrations apply tank-entitlements --remote`
+  3. `npx wrangler@4 secret put AUTH_SECRET` (bắt buộc khi PAYMENTS_LIVE=true; sandbox có giá trị dev mặc định)
+  4. `npm run deploy:cf`
+- Thanh toán thật: đặt `PAYMENTS_LIVE="true"`, `secret put PAYMENT_CHECKSUM_KEY`, PAY_BANK/PAY_ACCOUNT/PAY_ACCOUNT_NAME thật,
+  trỏ webhook provider về `/v1/pay/webhook`. Khi live, `/v1/pay/sandbox/confirm` trả 404.
