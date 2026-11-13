@@ -56,7 +56,7 @@ export default {
         const pid = await eco.verifyToken(env, body.refreshToken, 'r');
         return pid ? json({ accessToken: await eco.issueToken(env, pid, 'a') }) : json({ error: 'SESSION_EXPIRED' }, 401);
       }
-      if (p === '/v1/pay/webhook' && req.method === 'POST') { const r = await eco.handleWebhook(env, body); return json(r.body, r.status); }
+      if (p === '/v1/pay/webhook' && req.method === 'POST') { const r = await eco.handleWebhook(env, body, req.headers.get('authorization')); return json(r.body, r.status); }
       if (p === '/v1/shop' && req.method === 'GET') return json(await eco.shop(env, await eco.bearer(env, req)));
       if (p === '/v1/orders' || p.startsWith('/v1/orders/') || p === '/v1/pay/sandbox/confirm' || p === '/v1/entitlements') {
         const pid = await eco.bearer(env, req);

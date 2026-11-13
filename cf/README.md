@@ -47,5 +47,5 @@ Chỉ trang trí — không SKU nào đổi chỉ số xe (`test/cosmetics.test.
   2. `npx wrangler@4 d1 migrations apply tank-entitlements --remote`
   3. `npx wrangler@4 secret put AUTH_SECRET` (bắt buộc khi PAYMENTS_LIVE=true; sandbox có giá trị dev mặc định)
   4. `npm run deploy:cf`
-- Thanh toán thật: đặt `PAYMENTS_LIVE="true"`, `secret put PAYMENT_CHECKSUM_KEY`, PAY_BANK/PAY_ACCOUNT/PAY_ACCOUNT_NAME thật,
-  trỏ webhook provider về `/v1/pay/webhook`. Khi live, `/v1/pay/sandbox/confirm` trả 404.
+- Thanh toán thật (SePay): đặt `PAYMENTS_LIVE="true"`, `secret put SEPAY_API_KEY`, PAYMENT_BANK/PAYMENT_ACCOUNT/PAYMENT_ACCOUNT_NAME thật,
+  trỏ webhook SePay (kiểu xác thực API Key, tiền tố mã ARC, 8 ký tự) về `/v1/pay/webhook`. Khi live, `/v1/pay/sandbox/confirm` trả 404.

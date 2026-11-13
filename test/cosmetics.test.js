@@ -11,7 +11,8 @@ const { createRoom } = require('./host');
 /** D1 tối thiểu trên node:sqlite: prepare().bind().first/all/run + batch. */
 function fakeD1() {
   const db = new DatabaseSync(':memory:');
-  db.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0001_entitlements.sql'), 'utf8'));
+  const dir = path.join(__dirname, '..', 'migrations');
+  for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.sql')).sort()) db.exec(fs.readFileSync(path.join(dir, f), 'utf8'));
   const stmt = (sql, args = []) => ({
     bind: (...a) => stmt(sql, a),
     async first() { return db.prepare(sql).get(...args) || null; },
@@ -41,7 +42,7 @@ test('đơn hàng -> sandbox confirm -> entitlement; webhook lặp lại không 
   assert.equal(o.body.sandbox, true); assert.equal(o.body.qr.content, o.body.code);
   assert.equal((await e.orderStatus(env, playerId, o.body.orderId)).body.status, 'pending');
   const c = await e.sandboxConfirm(env, playerId, o.body.orderId);
-  assert.deepEqual(c.body, { ok: true, granted: 'tank.skin.gold' });
+  assert.equal(c.body.outcome, 'granted'); assert.equal(c.body.granted, 'tank.skin.gold');
   assert.equal((await e.orderStatus(env, playerId, o.body.orderId)).body.status, 'paid');
   assert.deepEqual(await e.entitlements(env, playerId), ['tank.skin.gold']);
   const again = await e.sandboxConfirm(env, playerId, o.body.orderId);
@@ -51,27 +52,81 @@ test('đơn hàng -> sandbox confirm -> entitlement; webhook lặp lại không 
   assert.equal((await e.createOrder(env, playerId, 'tank.skin.gold')).status, 409, 'skin chỉ mua một lần');
 });
 
-test('webhook: chữ ký sai 401, sai số tiền không cấp, txn khác cho đơn đã trả không cấp lại', async () => {
-  const e = await eco(); const env = envOf({ PAYMENT_CHECKSUM_KEY: 'k1' });
+const KEY = 'k1', AUTH = 'Apikey ' + KEY;
+const sepay = (extra) => Object.assign({ id: 92704, gateway: 'MBBank', transactionDate: '2026-11-13 10:00:00', accountNumber: '0123',
+  subAccount: null, code: null, content: '', transferType: 'in', description: '', transferAmount: 19000, accumulated: 0, referenceCode: 'FT1' }, extra);
+const events = (env) => env.DB.prepare('SELECT provider_txn, order_id, outcome FROM payment_events ORDER BY created_at, provider_txn').all().then((r) => r.results);
+async function setup() {
+  const e = await eco(); const env = envOf({ SEPAY_API_KEY: KEY });
   const { playerId } = await e.newGuest(env);
   const o = (await e.createOrder(env, playerId, 'tank.skin.jade')).body;
-  const data = { orderCode: 123, amount: 19000, description: 'CK ' + o.code, reference: 'T1' };
-  assert.equal((await e.handleWebhook(env, { data, signature: await e.signData('wrong', data) })).status, 401);
-  const bad = { ...data, amount: 1000, reference: 'T0' };
-  assert.equal((await e.handleWebhook(env, { data: bad, signature: await e.signData('k1', bad) })).body.error, 'AMOUNT_MISMATCH');
-  assert.deepEqual(await e.entitlements(env, playerId), []);
-  assert.equal((await e.handleWebhook(env, { data, signature: await e.signData('k1', data) })).body.granted, 'tank.skin.jade');
-  const d2 = { ...data, reference: 'T2' };
-  assert.equal((await e.handleWebhook(env, { data: d2, signature: await e.signData('k1', d2) })).body.duplicate, true);
+  return { e, env, playerId, o };
+}
+
+test('SePay QR: qr.sepay.vn với acc/bank/amount/des', async () => {
+  const { o } = await setup();
+  assert.equal(o.qr.provider, 'sepay'); assert.equal(o.qr.content, o.code);
+  assert.equal(o.qr.imageUrl, `https://qr.sepay.vn/img?acc=SANDBOX&bank=MBBank&amount=19000&des=${o.code}`);
 });
 
-test('PAYMENTS_LIVE=true: không có sandbox confirm, thiếu key thì không nhận webhook', async () => {
+test('SePay webhook: đúng -> granted (mã trong content); trùng id -> cấp một lần', async () => {
+  const { e, env, playerId, o } = await setup();
+  const r = await e.handleWebhook(env, sepay({ content: 'CK ' + o.code.toLowerCase() + ' thanh toan' }), AUTH);
+  assert.equal(r.status, 200); assert.equal(r.body.outcome, 'granted'); assert.equal(r.body.granted, 'tank.skin.jade');
+  const dup = await e.handleWebhook(env, sepay({ content: 'CK ' + o.code }), AUTH);
+  assert.equal(dup.status, 200); assert.equal(dup.body.duplicate, true);
+  const { results } = await env.DB.prepare('SELECT COUNT(*) AS n FROM entitlements WHERE player_id = ?').bind(playerId).all();
+  assert.equal(results[0].n, 1);
+  // giao dịch khác (id mới) cho đơn đã trả: ghi already_paid, không cấp lại
+  assert.equal((await e.handleWebhook(env, sepay({ id: 92705, code: o.code }), AUTH)).body.outcome, 'already_paid');
+  assert.deepEqual((await events(env)).map((x) => x.outcome), ['granted', 'already_paid']);
+});
+
+test('SePay webhook: sai/thiếu key 401 không ghi gì; thiếu id 400', async () => {
+  const { e, env, playerId, o } = await setup();
+  for (const a of ['Apikey wrong', '', null, 'Bearer k1', 'k1']) assert.equal((await e.handleWebhook(env, sepay({ code: o.code }), a)).status, 401, String(a));
+  assert.deepEqual(await e.entitlements(env, playerId), []);
+  assert.deepEqual(await events(env), []);
+  assert.equal((await e.handleWebhook(env, sepay({ id: undefined, code: o.code }), AUTH)).status, 400);
+  assert.equal((await e.handleWebhook(env, sepay({ id: 'abc', code: o.code }), AUTH)).status, 400);
+});
+
+test('SePay webhook: sai số tiền / không có mã / mã lạ / chuyển ra -> ghi outcome, không cấp', async () => {
+  const { e, env, playerId, o } = await setup();
+  const cases = [
+    [sepay({ id: 1, code: o.code, transferAmount: 18000 }), 'amount_mismatch'],
+    [sepay({ id: 2, code: o.code, transferAmount: 20000 }), 'amount_mismatch'],
+    [sepay({ id: 3, content: 'chuyen tien an trua' }), 'no_code'],
+    [sepay({ id: 4, code: 'ARCZZZZZZZZ' }), 'unknown_order'],
+    [sepay({ id: 5, code: o.code, transferType: 'out' }), 'ignored_out'],
+  ];
+  for (const [body, want] of cases) {
+    const r = await e.handleWebhook(env, body, AUTH);
+    assert.equal(r.status, 200); assert.equal(r.body.success, true); assert.equal(r.body.outcome, want, JSON.stringify(body));
+  }
+  assert.deepEqual(await e.entitlements(env, playerId), []);
+  const ev = await events(env);
+  assert.deepEqual(ev.map((x) => x.provider_txn + ':' + x.outcome).sort(), ['sepay:1:amount_mismatch', 'sepay:2:amount_mismatch', 'sepay:3:no_code', 'sepay:4:unknown_order', 'sepay:5:ignored_out']);
+  assert.equal(ev.find((x) => x.provider_txn === 'sepay:3').order_id, null);
+  // sau tất cả, giao dịch đúng vẫn cấp được
+  assert.equal((await e.handleWebhook(env, sepay({ id: 6, code: o.code }), AUTH)).body.outcome, 'granted');
+});
+
+test('PAYMENTS_LIVE=true: không có sandbox confirm, thiếu SEPAY_API_KEY -> 503', async () => {
   const e = await eco(); const env = envOf({ PAYMENTS_LIVE: 'true', AUTH_SECRET: 's' });
   const { playerId } = await e.newGuest(env);
   const o = (await e.createOrder(env, playerId, 'tank.skin.jade')).body;
   assert.equal(o.sandbox, false);
   assert.equal((await e.sandboxConfirm(env, playerId, o.orderId)).status, 404);
-  assert.equal((await e.handleWebhook(env, { data: {}, signature: '' })).status, 500);
+  assert.equal((await e.handleWebhook(env, sepay({ code: o.code }), 'Apikey tank-sandbox-sepay')).status, 503);
+});
+
+test('sandbox: không có SEPAY_API_KEY thì dùng key sandbox; key sandbox bị từ chối khi đã đặt key thật', async () => {
+  const e = await eco(); const env = envOf();
+  const { playerId } = await e.newGuest(env);
+  const o = (await e.createOrder(env, playerId, 'tank.skin.gold')).body;
+  assert.equal((await e.handleWebhook(envOf({ SEPAY_API_KEY: 'real' }), sepay({ code: o.code }), 'Apikey tank-sandbox-sepay')).status, 401);
+  assert.equal((await e.handleWebhook(env, sepay({ code: o.code, transferAmount: 29000 }), 'Apikey tank-sandbox-sepay')).body.outcome, 'granted');
 });
 
 test('pass co-op hết hạn sau 28 ngày, mua tiếp thì cộng dồn', async () => {
