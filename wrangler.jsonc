@@ -5,8 +5,9 @@
   "compatibility_date": "2026-11-02",
   "observability": { "enabled": true },
   "workers_dev": true,
-  // Chỉ bật khi playtest trên *.workers.dev đã pass (xem cf/README.md):
-  // "routes": [{ "pattern": "tank.bomclaw.org", "custom_domain": true }],
+  // Worker route (không phải custom domain): chặn tank.bomclaw.org trước bản ghi DNS
+  // tunnel của Mac, nên không cần xoá DNS hay restart cloudflared. Rollback = xoá dòng này + deploy.
+  "routes": [{ "pattern": "tank.bomclaw.org/*", "zone_name": "bomclaw.org" }],
   "assets": { "directory": "public", "binding": "ASSETS", "run_worker_first": ["/v1/*", "/ws"] },
   "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "TankRoom" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TankRoom"] }]

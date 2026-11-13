@@ -19,18 +19,20 @@ node test/playtest.js https://tank-battle-90.lequidon-1993.workers.dev/  # Chrom
 ```
 Deploy làm rớt phòng đang chơi (DO khởi động lại) — deploy lúc vắng.
 
-## Chuyển tank.bomclaw.org sang Cloudflare
-1. Gỡ hostname `tank.bomclaw.org` khỏi cloudflared tunnel của Mac (đang trỏ về platform :8090),
-   nếu không custom domain sẽ báo trùng record.
-2. Bỏ comment dòng `routes` trong `wrangler.jsonc`, `npx wrangler@4 deploy`.
-3. Chạy lại `cf-smoke.js` + `playtest.js` với `https://tank.bomclaw.org`.
+## tank.bomclaw.org (đã chuyển 13/11/2026)
+`wrangler.jsonc` có **Worker route** `tank.bomclaw.org/*` (zone bomclaw.org) — không phải custom domain.
+Bản ghi DNS `tank` vẫn là CNAME proxied về cloudflared tunnel của Mac; Cloudflare chạy Worker route
+TRƯỚC khi tới origin, nên mọi request vào Worker và tunnel không còn nhận traffic tank.
+Không phải xoá DNS hay restart cloudflared (token CF hiện không có quyền DNS).
 
 ## Rollback về server Mac
-Server cũ không bị đụng: platform `com.ngocp.arcade` (:8090) vẫn phục vụ `games/tank-battle`.
-1. Xoá route: comment lại `routes` rồi `npx wrangler@4 deploy` (hoặc dashboard → Workers → tank-battle-90 → Domains → Remove).
-2. Thêm lại `tank.bomclaw.org` vào cloudflared tunnel trỏ `http://localhost:8090`.
-3. Bản workers.dev có thể giữ hoặc `npx wrangler@4 delete`.
-Rollback một bản Worker lỗi (không đổi domain): `npx wrangler@4 rollback`.
+Server cũ không bị đụng: platform `com.ngocp.arcade` (:8090) vẫn phục vụ `games/tank-battle`,
+và `~/.cloudflared/config.yml` vẫn có ingress `tank.bomclaw.org → :8090`.
+1. Xoá dòng `routes` trong `wrangler.jsonc` rồi `npx wrangler@4 deploy`
+   (hoặc dashboard → Workers → tank-battle-90 → Settings → Domains & Routes → xoá route).
+2. Xong — request rơi lại xuống tunnel → Mac. Kiểm: `curl https://tank.bomclaw.org/v1/health`
+   không còn trả `"runtime":"cloudflare"`.
+Rollback một bản Worker lỗi (giữ route): `npx wrangler@4 rollback`.
 
 ## Chi phí
 Mỗi phòng có người = một DO chạy liên tục (~30 tin/s/người chiều ra; tin chiều vào tính như request).
