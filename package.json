@@ -7,7 +7,12 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test test/*.test.js",
-    "playtest": "node test/playtest.js"
+    "playtest": "node test/playtest.js",
+    "build:cf": "node server/build-room.js && node cf/build.js",
+    "deploy:cf": "npm run build:cf && npx wrangler@4 deploy",
+    "smoke:cf": "node test/cf-smoke.js",
+    "smoke:cf:economy": "node test/cf-economy-smoke.mjs",
+    "dev:cf": "npm run build:cf && npx wrangler@4 d1 migrations apply tank-entitlements --local && npx wrangler@4 dev --local --local-upstream 127.0.0.1:8787"
   },
   "dependencies": {
     "ws": "^8.21.3"

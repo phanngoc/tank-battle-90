@@ -694,6 +694,11 @@ class Game {
 var game = new Game();            // mỗi phòng một sandbox -> biến này là của riêng phòng
 var slotOf = {};                  // playerId -> slot
 var lastStageKey = '';
+// Skin chỉ là TRÌNH BÀY: slot -> skin id. Không bao giờ chạm vào `game` (engine),
+// nên chỉ số xe (tốc độ, đạn, máu) giống hệt dù có hay không có skin.
+// Host (DO trên CF) đọc entitlement rồi đưa vào player.skin khi join.
+var SKINS = { 'tank.skin.jade': 1, 'tank.skin.gold': 1, 'tank.pass.coop': 1, 'tank.room.festival': 1 };
+var skinOf = {};                  // slot -> skin id
 
 function writeState(room) {
   var s = game.snapshot();
@@ -720,6 +725,10 @@ function writeState(room) {
   for (i = 0; i < s.players.length; i++) players[s.players[i].slot] = s.players[i];
   st.players = players;
 
+  var skins = {};
+  for (var k in skinOf) skins[k] = skinOf[k];
+  st.skins = skins;
+
   st.powerups = s.powerups;       // ít và thay đổi thưa -> để mảng là ổn
 
   // Thứ chỉ sống một tick thì gửi làm event, không đưa vào state
@@ -737,7 +746,7 @@ module.exports = {
       // để dựng canvas. Nằm trong state nên chỉ tốn băng thông đúng một lần.
       dims: { tile: TILE, cols: COLS, rows: ROWS },
       tick: 0, stage: 1, status: 'lobby', frozen: 0, enemiesLeft: 0, friendlyFire: true,
-      tanks: {}, bullets: {}, players: {}, powerups: [],
+      tanks: {}, bullets: {}, players: {}, powerups: [], skins: {},
       base: { x: 0, y: 0, alive: true },
       map: game.fullMap(),
     };
@@ -753,6 +762,8 @@ module.exports = {
     var p = game.addPlayer(player.name);
     if (!p) { room.log('phòng đầy, engine từ chối ' + player.id); return; }
     slotOf[player.id] = p.slot;
+    if (player.skin && SKINS[player.skin] === 1) skinOf[p.slot] = player.skin;
+    else delete skinOf[p.slot];
     room.send(player.id, 'you', { slot: p.slot, color: p.color });
     writeState(room);
   },
@@ -762,6 +773,7 @@ module.exports = {
     if (slot === undefined) return;
     game.removePlayer(slot);
     delete slotOf[player.id];
+    delete skinOf[slot];
   },
 
   onMessage: function (room, player, type, d) {
@@ -789,6 +801,13 @@ module.exports = {
       if (slot !== minSlot) return;
       if (d && typeof d.friendlyFire === 'boolean') {
         game.friendlyFire = d.friendlyFire;
+        writeState(room);
+      }
+    } else if (type === 'skin') {
+      // Host đổi skin giữa trận (sau khi mua xong). Chỉ host (DO) gửi được loại
+      // này — client gửi 'msg' với n='skin' sẽ bị DO chặn trước khi tới đây.
+      if (player.trusted && d && (d.skin === null || SKINS[d.skin] === 1)) {
+        if (d.skin) skinOf[slot] = d.skin; else delete skinOf[slot];
         writeState(room);
       }
     } else if (type === 'start') {

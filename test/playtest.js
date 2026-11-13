@@ -142,7 +142,7 @@ function startFakePlatform() {
 
 /** Người chơi thứ 2: WebSocket thuần, nói đúng giao thức SDK. */
 function botJoin(baseUrl, code, name) {
-  const ws = new WebSocket(baseUrl.replace(/^http/, 'ws') + 'ws');
+  const ws = new WebSocket(baseUrl.replace(/^http/, 'ws') + 'ws?room=' + encodeURIComponent(code));
   const bot = { ws, state: null, slot: null, ready: null };
   bot.ready = new Promise((res, rej) => {
     ws.on('open', () => { ws.send(JSON.stringify({ t: 'hello', v: 1 })); ws.send(JSON.stringify({ t: 'join', code, name })); });
