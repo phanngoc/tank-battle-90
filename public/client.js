@@ -780,7 +780,7 @@ function drawSkinMark(skin, x, y, s, tick) {
   else if (skin === 'tank.room.festival' && Math.floor(tick / 6) % 2) { ctx.fillStyle = '#ffe14d'; ctx.fillRect(x + 3, y + 3, 2, 2); ctx.fillRect(x + s - 5, y + s - 5, 2, 2); }
 }
 
-// ═══ Cửa hàng + QR (VietQR). Sandbox: nút xác nhận giả lập webhook ═══════════════
+// ═══ Cửa hàng + QR (SePay). Sandbox: nút xác nhận giả lập webhook ═══════════════
 let owned = [];
 let festivalToggle = null;
 async function api(method, path, body) {
@@ -830,7 +830,7 @@ async function buy(sku, card) {
   card.innerHTML = (o.sandbox ? '<div class="shop-sandbox">SANDBOX — chưa nhận tiền thật</div>' : '') +
     '<div class="shop-title">Quét mã để thanh toán</div>' +
     '<img class="shop-qr" alt="QR" src="' + o.qr.imageUrl + '">' +
-    '<div class="shop-info">' + o.qr.bank + ' · ' + o.qr.account + '<br>Số tiền: <b>' + fmtVnd(o.amount) + '</b><br>Nội dung CK: <b class="shop-code">' + o.code + '</b></div>' +
+    '<div class="shop-info">' + o.qr.bank + ' · ' + o.qr.account + (o.qr.accountName ? ' · ' + o.qr.accountName : '') + '<br>Số tiền: <b>' + fmtVnd(o.amount) + '</b><br>Nội dung CK: <b class="shop-code">' + o.code + '</b></div>' +
     '<div class="shop-status" id="shopStatus">⏳ Đang chờ thanh toán…</div>' +
     (o.sandbox ? '<button class="ov-btn" id="sbxConfirm">✅ Xác nhận (sandbox)</button>' : '') +
     '<button class="ov-btn ghost" id="shopClose">Đóng</button>';

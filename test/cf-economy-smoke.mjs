@@ -10,12 +10,25 @@ ok('orders cần auth', (await req('POST', '/v1/orders', { sku: 'tank.skin.gold'
 const shop = (await req('GET', '/v1/shop', null, host.accessToken)).b; ok('shop 4 SKU', shop.length === 4, shop.map((x) => x.sku + ':' + x.price).join(' '));
 for (const sku of ['tank.skin.gold', 'tank.room.festival']) {
   const o = (await req('POST', '/v1/orders', { sku }, host.accessToken)).b;
-  ok('order ' + sku, /^ARC/.test(o.code) && o.sandbox === true && o.qr.imageUrl.includes('img.vietqr.io'), o.code + ' ' + o.amount);
+  ok('order ' + sku, /^ARC/.test(o.code) && o.sandbox === true && o.qr.imageUrl.startsWith('https://qr.sepay.vn/img?') && o.qr.provider === 'sepay', o.code + ' ' + o.amount);
   ok('pending', (await req('GET', '/v1/orders/' + o.orderId, null, host.accessToken)).b.status === 'pending');
   const c = await req('POST', '/v1/pay/sandbox/confirm', { orderId: o.orderId }, host.accessToken); ok('sandbox confirm', c.b.granted === sku, JSON.stringify(c.b));
   ok('paid', (await req('GET', '/v1/orders/' + o.orderId, null, host.accessToken)).b.status === 'paid');
 }
-const forged = await req('POST', '/v1/pay/webhook', { data: { orderCode: 'ARCAAAAAAAA', amount: 1 }, signature: 'deadbeef' }); ok('webhook chữ ký giả 401', forged.s === 401);
+const hook = async (body, key) => { const r = await fetch(B + '/v1/pay/webhook', { method: 'POST', headers: { 'content-type': 'application/json', ...(key ? { authorization: 'Apikey ' + key } : {}) }, body: JSON.stringify(body) }); return { s: r.status, b: await r.json() }; };
+const SBX = process.env.SEPAY_API_KEY || 'tank-sandbox-sepay', uid = Date.now();
+const buyer = (await req('POST', '/v1/auth/guest', {})).b;
+const jade = (await req('POST', '/v1/orders', { sku: 'tank.skin.jade' }, buyer.accessToken)).b;
+const tx = (id, x) => ({ id, gateway: 'SMOKE', transactionDate: '2026-11-13 00:00:00', accountNumber: 'SANDBOX', code: null, content: '', transferType: 'in', transferAmount: 19000, referenceCode: 'SMK', ...x });
+ok('webhook không có key 401', (await hook(tx(uid, { code: jade.code }))).s === 401);
+ok('webhook sai key 401', (await hook(tx(uid, { code: jade.code }), 'wrong-key')).s === 401);
+ok('webhook sai số tiền', (await hook(tx(uid + 1, { code: jade.code, transferAmount: 1000 }), SBX)).b.outcome === 'amount_mismatch');
+ok('webhook không có mã', (await hook(tx(uid + 2, { content: 'tien an trua' }), SBX)).b.outcome === 'no_code');
+ok('webhook chuyển ra bỏ qua', (await hook(tx(uid + 3, { code: jade.code, transferType: 'out' }), SBX)).b.outcome === 'ignored_out');
+ok('buyer chưa có jade', !(await req('GET', '/v1/entitlements', null, buyer.accessToken)).b.includes('tank.skin.jade'));
+const g1 = await hook(tx(uid + 4, { content: 'CK ' + jade.code }), SBX); ok('webhook đúng -> granted', g1.b.granted === 'tank.skin.jade', JSON.stringify(g1.b));
+ok('webhook trùng id -> duplicate', (await hook(tx(uid + 4, { content: 'CK ' + jade.code }), SBX)).b.duplicate === true);
+ok('buyer có jade', (await req('GET', '/v1/entitlements', null, buyer.accessToken)).b.includes('tank.skin.jade'));
 ok('entitlements', JSON.stringify((await req('GET', '/v1/entitlements', null, host.accessToken)).b.sort()) === JSON.stringify(['tank.room.festival', 'tank.skin.gold']));
 // phòng thường: host thấy skin gold, guest không có
 let pick = (await req('POST', '/v1/rooms/pick', {})).b.wsUrl;
