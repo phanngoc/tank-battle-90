@@ -7,6 +7,7 @@
      tick liên tục nên DO không bao giờ ngủ được.
    Giao thức WS giống roomd (hello/create/join/rejoin/msg/leave → welcome/snap/ev/err). */
 import { makeRoomModule } from './room-factory.mjs';
+import * as eco from './economy.mjs';
 
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const TICK_HZ = 30;
@@ -29,6 +30,10 @@ async function roomActive(env, code) {
   return (await r.json()).active;
 }
 
+// Mua xong khi đang trong phòng: client gọi /v1/room-skin (biết mã phòng); ở đây không có
+// sổ player->phòng nên không làm gì thêm. Giữ hàm để webhook thật (không có client) vẫn an toàn.
+async function notifyRoomsOfPurchase() {}
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
@@ -45,8 +50,26 @@ export default {
       const wsBase = (url.protocol === 'https:' ? 'wss://' : 'ws://') + url.host + '/ws?room=';
       let body = {};
       if (req.method === 'POST') { try { body = await req.json(); } catch { body = {}; } }
-      if (p === '/v1/auth/guest') return json({ accessToken: rid('a'), refreshToken: rid('r'), playerId: rid('g'), isGuest: true });
-      if (p === '/v1/auth/refresh') return json({ accessToken: rid('a') });
+      // token có chữ ký -> playerId ổn định, entitlement gắn được vào người chơi
+      if (p === '/v1/auth/guest') return json(await eco.newGuest(env));
+      if (p === '/v1/auth/refresh') {
+        const pid = await eco.verifyToken(env, body.refreshToken, 'r');
+        return pid ? json({ accessToken: await eco.issueToken(env, pid, 'a') }) : json({ error: 'SESSION_EXPIRED' }, 401);
+      }
+      if (p === '/v1/pay/webhook' && req.method === 'POST') { const r = await eco.handleWebhook(env, body); return json(r.body, r.status); }
+      if (p === '/v1/shop' && req.method === 'GET') return json(await eco.shop(env, await eco.bearer(env, req)));
+      if (p === '/v1/orders' || p.startsWith('/v1/orders/') || p === '/v1/pay/sandbox/confirm' || p === '/v1/entitlements') {
+        const pid = await eco.bearer(env, req);
+        if (!pid) return json({ error: 'UNAUTHORIZED' }, 401);
+        let r;
+        if (p === '/v1/entitlements') return json(await eco.entitlements(env, pid));
+        if (p === '/v1/orders' && req.method === 'POST') r = await eco.createOrder(env, pid, String(body.sku || ''));
+        else if (p.startsWith('/v1/orders/') && req.method === 'GET') r = await eco.orderStatus(env, pid, p.slice('/v1/orders/'.length));
+        else if (p === '/v1/pay/sandbox/confirm' && req.method === 'POST') r = await eco.sandboxConfirm(env, pid, String(body.orderId || ''));
+        else r = { status: 405, body: { error: 'METHOD' } };
+        if (r.status === 200 && r.body && r.body.granted) await notifyRoomsOfPurchase(env, pid);
+        return json(r.body, r.status);
+      }
       if (p === '/v1/rooms/pick') {
         for (let i = 0; i < 6; i++) {
           const code = genCode();
@@ -61,6 +84,13 @@ export default {
       }
       if (p === '/v1/events') return json({ ok: true });
       if (p.startsWith('/v1/leaderboard/')) return req.method === 'GET' ? json({ entries: [] }) : json({ ok: true, verified: false });
+      if (p === '/v1/room-skin' && req.method === 'POST') {   // client báo "tôi đang ở phòng X" sau khi mua
+        const pid = await eco.bearer(env, req);
+        const code = String(body.code || '').toUpperCase();
+        if (!pid || !/^[A-Z0-9]{4}$/.test(code)) return json({ error: 'BAD_REQUEST' }, 400);
+        await roomStub(env, code).fetch('https://room/refresh-skin', { method: 'POST', body: JSON.stringify({ playerId: pid }) });
+        return json({ ok: true });
+      }
       if (p === '/v1/health') return json({ ok: true, runtime: 'cloudflare' });
       return json({ error: 'NOT_FOUND' }, 404);
     }
@@ -86,18 +116,27 @@ export class TankRoom {
     this.players = new Map();        // playerId -> { id, name, isHost, session, ws, dropTimer }
     this.sessions = new Map();       // session -> playerId
     this.timer = null; this.emptyTimer = null; this.seq = 0;
+    this.festival = false;
   }
 
   async fetch(req) {
     const url = new URL(req.url);
     if (url.pathname === '/info') return json({ active: !!this.mod, players: this.players.size });
+    if (url.pathname === '/refresh-skin') {
+      const { playerId } = await req.json();
+      for (const p of this.players.values()) if (p.account === playerId && this.mod) {
+        p.skin = await this.skinFor(playerId);
+        this.mod.onMessage(this.room, { id: p.id, name: p.name, isHost: p.isHost, trusted: true }, 'skin', { skin: p.skin });
+      }
+      return json({ ok: true });
+    }
     if (req.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
     const code = String(url.searchParams.get('room') || '').toUpperCase();
     const pair = new WebSocketPair();
     const ws = pair[1];
     ws.accept();
     this.conns.add(ws);
-    ws.addEventListener('message', (e) => { try { this.onWsMessage(ws, code, e.data); } catch (err) { console.error('room', code, err && err.stack || err); } });
+    ws.addEventListener('message', (e) => { Promise.resolve().then(() => this.onWsMessage(ws, code, e.data)).catch((err) => console.error('room', code, err && err.stack || err)); });
     const gone = () => this.onWsClose(ws);
     ws.addEventListener('close', gone);
     ws.addEventListener('error', gone);
@@ -105,6 +144,12 @@ export class TankRoom {
   }
 
   send(ws, obj) { try { ws.send(typeof obj === 'string' ? obj : JSON.stringify(obj)); } catch { /* đã đóng */ } }
+
+  /** skin của một account trong phòng này (chỉ trình bày, không đổi chỉ số). */
+  async skinFor(account) {
+    if (this.festival) return eco.FESTIVAL_SKIN;
+    try { return eco.pickSkin(await eco.entitlements(this.env, account), false); } catch (err) { console.error('skin', err && err.message); return null; }
+  }
 
   createRoom(code, opts) {
     const mod = makeRoomModule();
@@ -152,22 +197,45 @@ export class TankRoom {
     this.send(ws, { t: 'welcome', code: this.code, url: '', playerId: p.id, isHost: p.isHost, session: p.session });
   }
 
-  onWsMessage(ws, code, raw) {
+  async onWsMessage(ws, code, raw) {
     let m; try { m = JSON.parse(typeof raw === 'string' ? raw : new TextDecoder().decode(raw)); } catch { return; }
     switch (m.t) {
-      case 'hello': case 'pong': return;
+      case 'hello':
+        // token SDK gửi trong hello -> account (null nếu token cũ/không ký): chỉ để tra entitlement
+        ws.accountP = eco.verifyToken(this.env, m.token, 'a').catch(() => null);
+        return;
+      case 'pong': return;
       case 'create': case 'join': {
-        if (ws.playerId) return;
-        if (m.t === 'create') { if (this.mod) return this.send(ws, { t: 'err', code: 'ROOM_EXISTS' }); this.createRoom(code, m.opts); }
+        if (ws.playerId || ws.joining) return;
+        ws.joining = true;
+        // Mọi truy vấn D1 làm TRƯỚC khi đụng vào phòng, để phần dưới chạy liền một mạch.
+        let account = null, festival = false, skin = null;
+        try {
+          account = await (ws.accountP || null);
+          // Phòng Lễ Hội: host mua lượt, tạo phòng với opts.festival -> tiêu 1 lượt trước khi tạo
+          if (m.t === 'create' && m.opts && m.opts.festival === true && !this.mod) festival = await eco.consumeFestival(this.env, account);
+          if (festival || (m.t === 'join' && this.festival)) skin = eco.FESTIVAL_SKIN;
+          else if (account) skin = eco.pickSkin(await eco.entitlements(this.env, account), false);
+        } catch (err) { console.error('entitlements', err && err.message); }
+        finally { ws.joining = false; }
+        if (ws.readyState !== undefined && ws.readyState > 1) return;   // đã đóng trong lúc chờ D1
+        if (m.t === 'create') {
+          if (this.mod) return this.send(ws, { t: 'err', code: 'ROOM_EXISTS' });
+          const opts = Object.assign({}, m.opts); delete opts.festival;
+          this.createRoom(code, opts);
+          this.festival = festival;
+          this.room.state.festival = festival;
+        }
         else if (!this.mod) return this.send(ws, { t: 'err', code: 'ROOM_NOT_FOUND' });
         if (this.players.size >= MAX_PLAYERS) return this.send(ws, { t: 'err', code: 'ROOM_FULL' });
         if (this.emptyTimer) { clearTimeout(this.emptyTimer); this.emptyTimer = null; }
-        const p = { id: rid('pl'), name: String(m.name || '').slice(0, 12), isHost: this.players.size === 0, session: rid('s'), ws };
+        const p = { id: rid('pl'), name: String(m.name || '').slice(0, 12), isHost: this.players.size === 0, session: rid('s'), ws, account };
+        p.skin = this.festival ? eco.FESTIVAL_SKIN : skin;
         this.players.set(p.id, p); this.sessions.set(p.session, p.id);
         ws.playerId = p.id;
         this.welcome(ws, p);
         for (const q of this.players.values()) if (q.ws && q !== p) this.send(q.ws, { t: 'join', p: { id: p.id, name: p.name } });
-        this.mod.onJoin(this.room, { id: p.id, name: p.name, isHost: p.isHost });
+        this.mod.onJoin(this.room, { id: p.id, name: p.name, isHost: p.isHost, skin: p.skin });
         this.broadcastSnap();
         return;
       }
@@ -187,6 +255,7 @@ export class TankRoom {
         if (this.mod) this.send(ws, '{"t":"snap","seq":' + this.seq + ',"s":' + JSON.stringify(this.room.state) + '}');
         return;
       case 'msg': {
+        if (String(m.n) === 'skin') return;          // skin chỉ do server đặt (từ entitlement)
         const p = ws.playerId && this.players.get(ws.playerId);
         if (p && this.mod) this.mod.onMessage(this.room, { id: p.id, name: p.name, isHost: p.isHost }, String(m.n), m.d);
         return;

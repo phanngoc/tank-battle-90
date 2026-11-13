@@ -83,6 +83,9 @@ async function connect() {
   setNet(false, '• đang kết nối…');
   try {
     arcade = await window.Arcade.init({ gameId: 'tank-battle' });
+    // token kiểu cũ (không ký) không gắn được entitlement -> xin guest mới một lần
+    if (arcade.access && !/^a\./.test(arcade.access)) { arcade.clear(); await arcade.auth.guest(); }
+    refreshOwned();
     setNet(false, '• sẵn sàng');
   } catch (e) {
     setNet(false, '• offline');
@@ -133,6 +136,7 @@ function wireRoom(r) {
   });
 
   r.onState(function (s) {
+    skinsBySlot = (s && s.skins) || {};
     if (s.dims && !canvasReady) {
       canvasReady = true;
       TILE = s.dims.tile; COLS = s.dims.cols; ROWS = s.dims.rows;
@@ -160,7 +164,8 @@ let canvasReady = false;
 
 async function createRoom() {
   ensureAudio(); showErr('');
-  try { wireRoom(await arcade.rooms.create('coop', undefined, getName())); }
+  var fest = festivalToggle && festivalToggle.checked;
+  try { wireRoom(await arcade.rooms.create('coop', fest ? { festival: true } : undefined, getName())); if (fest) refreshOwned(); }
   catch (e) { showErr('Không tạo được phòng: ' + e.message); }
 }
 
@@ -441,7 +446,8 @@ function drawTank(t, tick, frozen, px, py) {
   const x = px, y = py, s = TILE * 2;
   // spawn materialise animation
   if (t.sp) { drawSpawnStar(x + s / 2, y + s / 2, tick); return; }
-  let col = t.k === 'p' ? t.c : enemyColor(t, tick);
+  const skin = t.k === 'p' ? skinsBySlot[t.slot] : null;
+  let col = t.k === 'p' ? skinColor(skin, tick) || t.c : enemyColor(t, tick);
   if (t.k === 'e' && frozen) col = shade(col, -30);
   const dark = shade(col, -60);
   const light = shade(col, 30);
@@ -467,6 +473,8 @@ function drawTank(t, tick, frozen, px, py) {
   const cx = x + s / 2, cy = y + s / 2;
   const [dx, dy] = DIR[t.d];
   ctx.fillRect(cx + dx * 4 - 2, cy + dy * 4 - 2, 4 + Math.abs(dx) * 8, 4 + Math.abs(dy) * 8);
+
+  if (skin) drawSkinMark(skin, x, y, s, tick);
 
   if (t.st) { // stunned by a teammate: blinking dim + orbiting stars
     if (Math.floor(tick / 4) % 2) { ctx.fillStyle = 'rgba(20,24,40,0.45)'; ctx.fillRect(x, y, s, s); }
@@ -750,3 +758,106 @@ function playSfx(e) {
 setupCanvases();
 connect();
 render();
+
+
+// ═══ Mỹ phẩm: skin chỉ đổi MÀU/hoạ tiết, server không đổi chỉ số nào ═══════════
+let skinsBySlot = {};
+const SKIN_COLORS = { 'tank.skin.jade': '#36c79a', 'tank.skin.gold': '#f2c230', 'tank.pass.coop': '#8a7dff' };
+function skinColor(skin, tick) {
+  if (!skin) return null;
+  if (skin === 'tank.room.festival') return hslHex((tick * 4) % 360, 0.8, 0.6);
+  return SKIN_COLORS[skin] || null;
+}
+function hslHex(h, s, l) {
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => { const k = (n + h / 30) % 12; const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); return Math.round(255 * c).toString(16).padStart(2, '0'); };
+  return '#' + f(0) + f(8) + f(4);
+}
+function drawSkinMark(skin, x, y, s, tick) {
+  if (skin === 'tank.skin.gold') { ctx.fillStyle = '#fff6c2'; ctx.fillRect(x + s / 2 - 1, y + 9, 2, 2); }
+  else if (skin === 'tank.skin.jade') { ctx.fillStyle = '#c9ffe9'; ctx.fillRect(x + 9, y + s - 11, 2, 2); }
+  else if (skin === 'tank.pass.coop') { ctx.fillStyle = '#ffffff'; ctx.fillRect(x + 9, y + 9, 3, 1); ctx.fillRect(x + s - 12, y + s - 10, 3, 1); }
+  else if (skin === 'tank.room.festival' && Math.floor(tick / 6) % 2) { ctx.fillStyle = '#ffe14d'; ctx.fillRect(x + 3, y + 3, 2, 2); ctx.fillRect(x + s - 5, y + s - 5, 2, 2); }
+}
+
+// ═══ Cửa hàng + QR (VietQR). Sandbox: nút xác nhận giả lập webhook ═══════════════
+let owned = [];
+let festivalToggle = null;
+async function api(method, path, body) {
+  try { return (await arcade.req(method, path, body)).body; }
+  catch (e) {
+    if (e && (e.status === 401 || e.code === 'SESSION_EXPIRED')) { arcade.clear(); await arcade.auth.guest(); return (await arcade.req(method, path, body)).body; }
+    throw e;
+  }
+}
+async function refreshOwned() {
+  try { owned = await api('GET', '/v1/entitlements'); } catch (e) { owned = []; }
+  if (festivalToggle) festivalToggle.parentNode.style.display = owned.indexOf('tank.room.festival') >= 0 ? '' : 'none';
+}
+const fmtVnd = (n) => n.toLocaleString('vi-VN') + 'đ';
+function el(tag, attrs, html) { const e = document.createElement(tag); Object.assign(e, attrs || {}); if (html != null) e.innerHTML = html; return e; }
+
+let shopEl = null, pollTimer = null;
+function closeShop() { if (pollTimer) clearInterval(pollTimer); pollTimer = null; if (shopEl) shopEl.remove(); shopEl = null; }
+async function openShop() {
+  closeShop();
+  shopEl = el('div', { id: 'shop', className: 'shop-modal' });
+  const card = el('div', { className: 'shop-card' });
+  shopEl.appendChild(card);
+  shopEl.addEventListener('click', (e) => { if (e.target === shopEl) closeShop(); });
+  document.body.appendChild(shopEl);
+  card.innerHTML = '<div class="shop-title">🛒 Cửa hàng</div><div class="shop-note">Chỉ trang trí — không thay đổi sức mạnh xe.</div><div class="shop-list">Đang tải…</div><button class="ov-btn ghost" id="shopClose">Đóng</button>';
+  card.querySelector('#shopClose').onclick = closeShop;
+  let items;
+  try { items = await api('GET', '/v1/shop'); await refreshOwned(); }
+  catch (e) { card.querySelector('.shop-list').textContent = 'Không tải được cửa hàng.'; return; }
+  const list = card.querySelector('.shop-list'); list.innerHTML = '';
+  for (const it of items) {
+    const have = it.limitLeft === 0;
+    const row = el('div', { className: 'shop-item' },
+      '<span class="sw" style="background:' + (SKIN_COLORS[it.sku] || 'linear-gradient(90deg,#f55,#fd3,#5d5,#5af)') + '"></span>' +
+      '<span class="nm">' + it.label + '</span><span class="pr">' + fmtVnd(it.price) + '</span>');
+    const b = el('button', { className: 'ov-btn shop-buy', disabled: have }, have ? 'Đã có' : 'Mua');
+    b.dataset.sku = it.sku;
+    b.onclick = () => buy(it.sku, card);
+    row.appendChild(b); list.appendChild(row);
+  }
+}
+async function buy(sku, card) {
+  let o;
+  try { o = await api('POST', '/v1/orders', { sku }); }
+  catch (e) { alert(e.code === 'LIMIT_REACHED' ? 'Bạn đã có món này.' : 'Không tạo được đơn: ' + (e.code || e.message)); return; }
+  card.innerHTML = (o.sandbox ? '<div class="shop-sandbox">SANDBOX — chưa nhận tiền thật</div>' : '') +
+    '<div class="shop-title">Quét mã để thanh toán</div>' +
+    '<img class="shop-qr" alt="QR" src="' + o.qr.imageUrl + '">' +
+    '<div class="shop-info">' + o.qr.bank + ' · ' + o.qr.account + '<br>Số tiền: <b>' + fmtVnd(o.amount) + '</b><br>Nội dung CK: <b class="shop-code">' + o.code + '</b></div>' +
+    '<div class="shop-status" id="shopStatus">⏳ Đang chờ thanh toán…</div>' +
+    (o.sandbox ? '<button class="ov-btn" id="sbxConfirm">✅ Xác nhận (sandbox)</button>' : '') +
+    '<button class="ov-btn ghost" id="shopClose">Đóng</button>';
+  card.querySelector('#shopClose').onclick = closeShop;
+  const sbx = card.querySelector('#sbxConfirm');
+  if (sbx) sbx.onclick = async () => { sbx.disabled = true; try { await api('POST', '/v1/pay/sandbox/confirm', { orderId: o.orderId }); } catch (e) { sbx.disabled = false; } check(); };
+  const statusEl = card.querySelector('#shopStatus');
+  async function check() {
+    let st; try { st = (await api('GET', '/v1/orders/' + o.orderId)).status; } catch (e) { return; }
+    if (st === 'paid') {
+      clearInterval(pollTimer); pollTimer = null;
+      statusEl.textContent = '🎉 Đã thanh toán! Skin đã được mở khoá.';
+      await refreshOwned();
+      if (joined && myRoom) { try { await api('POST', '/v1/room-skin', { code: myRoom }); } catch (e) { /* lần vào phòng sau sẽ có */ } }
+    } else if (st === 'expired') { clearInterval(pollTimer); pollTimer = null; statusEl.textContent = 'Đơn đã hết hạn.'; }
+  }
+  pollTimer = setInterval(check, 3000);
+}
+(function mountShop() {
+  const btn = el('button', { className: 'ov-btn ghost', id: 'shopBtn' }, '🛒 Cửa hàng skin');
+  btn.onclick = openShop;
+  createBtn.parentNode.insertBefore(btn, ovErr);
+  const lab = el('label', { className: 'ov-fest' }, '<input type="checkbox" id="festivalToggle"> 🎉 Phòng Lễ Hội (cả phòng dùng skin lễ hội)');
+  lab.style.display = 'none';
+  createBtn.parentNode.insertBefore(lab, createBtn);
+  festivalToggle = lab.querySelector('input');
+  const btn2 = el('button', { className: 'ov-btn ghost', id: 'shopBtnWait' }, '🛒 Cửa hàng skin');
+  btn2.onclick = openShop;
+  beginBtn.parentNode.insertBefore(btn2, ffBtn.nextSibling);
+})();
