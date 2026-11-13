@@ -698,11 +698,29 @@ class Game {
 var game = new Game();            // mỗi phòng một sandbox -> biến này là của riêng phòng
 var slotOf = {};                  // playerId -> slot
 var lastStageKey = '';
-// Skin chỉ là TRÌNH BÀY: slot -> skin id. Không bao giờ chạm vào `game` (engine),
-// nên chỉ số xe (tốc độ, đạn, máu) giống hệt dù có hay không có skin.
-// Host (DO trên CF) đọc entitlement rồi đưa vào player.skin khi join.
-var SKINS = { 'tank.skin.jade': 1, 'tank.skin.gold': 1, 'tank.pass.coop': 1, 'tank.room.festival': 1 };
-var skinOf = {};                  // slot -> skin id
+// Mỹ phẩm chỉ là TRÌNH BÀY. Không bao giờ chạm vào `game` (engine), nên chỉ số
+// xe (tốc độ, đạn, máu, hitbox) giống hệt dù có hay không có cosmetic.
+// Host (DO trên CF) đọc entitlement + Tủ đồ rồi đưa vào player.cos khi join.
+//   tank/bullet: của từng người (đồng đội thấy)   eagle/map: của phòng, theo chủ phòng
+var COS_RE = {
+  tank: /^tank\.(skin\.[a-z]+|pass\.coop|room\.festival)$/,
+  bullet: /^tank\.bullet\.[a-z]+$/,
+  eagle: /^tank\.eagle\.[a-z]+$/,
+  map: /^tank\.map\.[a-z]+$/,
+};
+var cosOf = {};                   // slot -> { tank, bullet, eagle, map }
+
+function cleanCos(c) {
+  var out = {};
+  if (!c || typeof c !== 'object') return out;
+  for (var k in COS_RE) if (typeof c[k] === 'string' && COS_RE[k].test(c[k])) out[k] = c[k];
+  return out;
+}
+function hostSlot() {
+  var m = 99;
+  game.players.forEach(function (q) { if (q.slot < m) m = q.slot; });
+  return m;
+}
 
 function writeState(room) {
   var s = game.snapshot();
@@ -729,9 +747,18 @@ function writeState(room) {
   for (i = 0; i < s.players.length; i++) players[s.players[i].slot] = s.players[i];
   st.players = players;
 
-  var skins = {};
-  for (var k in skinOf) skins[k] = skinOf[k];
+  // skins: chỉ skin xe (client cũ đọc cái này). cos: xe + đạn theo slot. roomCos: map + đại bàng của chủ phòng.
+  var skins = {}, cos = {};
+  for (var k in cosOf) {
+    var c = cosOf[k], e = {};
+    if (c.tank) { skins[k] = c.tank; e.tank = c.tank; }
+    if (c.bullet) e.bullet = c.bullet;
+    if (e.tank || e.bullet) cos[k] = e;
+  }
   st.skins = skins;
+  st.cos = cos;
+  var h = cosOf[hostSlot()] || {};
+  st.roomCos = { eagle: h.eagle || null, map: h.map || null };
 
   st.powerups = s.powerups;       // ít và thay đổi thưa -> để mảng là ổn
 
@@ -750,7 +777,7 @@ module.exports = {
       // để dựng canvas. Nằm trong state nên chỉ tốn băng thông đúng một lần.
       dims: { tile: TILE, cols: COLS, rows: ROWS },
       tick: 0, stage: 1, status: 'lobby', frozen: 0, enemiesLeft: 0, friendlyFire: true,
-      tanks: {}, bullets: {}, players: {}, powerups: [], skins: {},
+      tanks: {}, bullets: {}, players: {}, powerups: [], skins: {}, cos: {}, roomCos: { eagle: null, map: null },
       base: { x: 0, y: 0, alive: true },
       map: game.fullMap(),
     };
@@ -766,8 +793,9 @@ module.exports = {
     var p = game.addPlayer(player.name);
     if (!p) { room.log('phòng đầy, engine từ chối ' + player.id); return; }
     slotOf[player.id] = p.slot;
-    if (player.skin && SKINS[player.skin] === 1) skinOf[p.slot] = player.skin;
-    else delete skinOf[p.slot];
+    // player.cos (mới) hoặc player.skin (host cũ): chỉ nhận SKU đúng dạng của từng slot
+    var c = cleanCos(player.cos || (player.skin ? { tank: player.skin } : null));
+    if (Object.keys(c).length) cosOf[p.slot] = c; else delete cosOf[p.slot];
     room.send(player.id, 'you', { slot: p.slot, color: p.color });
     writeState(room);
   },
@@ -777,7 +805,7 @@ module.exports = {
     if (slot === undefined) return;
     game.removePlayer(slot);
     delete slotOf[player.id];
-    delete skinOf[slot];
+    delete cosOf[slot];
   },
 
   onMessage: function (room, player, type, d) {
@@ -807,11 +835,12 @@ module.exports = {
         game.friendlyFire = d.friendlyFire;
         writeState(room);
       }
-    } else if (type === 'skin') {
-      // Host đổi skin giữa trận (sau khi mua xong). Chỉ host (DO) gửi được loại
-      // này — client gửi 'msg' với n='skin' sẽ bị DO chặn trước khi tới đây.
-      if (player.trusted && d && (d.skin === null || SKINS[d.skin] === 1)) {
-        if (d.skin) skinOf[slot] = d.skin; else delete skinOf[slot];
+    } else if (type === 'skin' || type === 'cos') {
+      // Host đổi cosmetic giữa trận (sau khi mua/trang bị). Chỉ host (DO) gửi được
+      // loại này — client gửi 'msg' với n='skin'/'cos' sẽ bị DO chặn trước khi tới đây.
+      if (player.trusted && d) {
+        var nc = cleanCos(type === 'cos' ? d.cos : (d.skin ? { tank: d.skin } : null));
+        if (Object.keys(nc).length) cosOf[slot] = nc; else delete cosOf[slot];
         writeState(room);
       }
     } else if (type === 'start') {

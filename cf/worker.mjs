@@ -58,11 +58,20 @@ export default {
       }
       if (p === '/v1/pay/webhook' && req.method === 'POST') { const r = await eco.handleWebhook(env, body, req.headers.get('authorization')); return json(r.body, r.status); }
       if (p === '/v1/shop' && req.method === 'GET') return json(await eco.shop(env, await eco.bearer(env, req)));
-      if (p === '/v1/orders' || p.startsWith('/v1/orders/') || p === '/v1/pay/sandbox/confirm' || p === '/v1/entitlements') {
+      if (p === '/v1/orders' || p.startsWith('/v1/orders/') || p === '/v1/pay/sandbox/confirm' || p === '/v1/entitlements' || p === '/v1/loadout') {
         const pid = await eco.bearer(env, req);
         if (!pid) return json({ error: 'UNAUTHORIZED' }, 401);
         let r;
         if (p === '/v1/entitlements') return json(await eco.entitlements(env, pid));
+        if (p === '/v1/loadout' && req.method === 'GET') return json(await eco.loadout(env, pid));
+        if (p === '/v1/loadout' && req.method === 'PUT') {
+          let b = {}; try { b = await req.json(); } catch { b = {}; }
+          r = await eco.setLoadout(env, pid, String(b.slot || ''), b.sku === null || b.sku === undefined ? null : String(b.sku));
+          // đang ở phòng nào thì báo phòng đó vẽ lại (đồng đội thấy ngay)
+          const code = String(b.room || '').toUpperCase();
+          if (r.status === 200 && /^[A-Z0-9]{4}$/.test(code)) await roomStub(env, code).fetch('https://room/refresh-skin', { method: 'POST', body: JSON.stringify({ playerId: pid }) }).catch(() => {});
+          return json(r.body, r.status);
+        }
         if (p === '/v1/orders' && req.method === 'POST') r = await eco.createOrder(env, pid, String(body.sku || ''));
         else if (p.startsWith('/v1/orders/') && req.method === 'GET') r = await eco.orderStatus(env, pid, p.slice('/v1/orders/'.length));
         else if (p === '/v1/pay/sandbox/confirm' && req.method === 'POST') r = await eco.sandboxConfirm(env, pid, String(body.orderId || ''));
@@ -125,8 +134,8 @@ export class TankRoom {
     if (url.pathname === '/refresh-skin') {
       const { playerId } = await req.json();
       for (const p of this.players.values()) if (p.account === playerId && this.mod) {
-        p.skin = await this.skinFor(playerId);
-        this.mod.onMessage(this.room, { id: p.id, name: p.name, isHost: p.isHost, trusted: true }, 'skin', { skin: p.skin });
+        p.cos = await this.cosFor(playerId);
+        this.mod.onMessage(this.room, { id: p.id, name: p.name, isHost: p.isHost, trusted: true }, 'cos', { cos: p.cos });
       }
       return json({ ok: true });
     }
@@ -145,10 +154,13 @@ export class TankRoom {
 
   send(ws, obj) { try { ws.send(typeof obj === 'string' ? obj : JSON.stringify(obj)); } catch { /* đã đóng */ } }
 
-  /** skin của một account trong phòng này (chỉ trình bày, không đổi chỉ số). */
-  async skinFor(account) {
-    if (this.festival) return eco.FESTIVAL_SKIN;
-    try { return eco.pickSkin(await eco.entitlements(this.env, account), false); } catch (err) { console.error('skin', err && err.message); return null; }
+  /** cosmetic của một account trong phòng này (chỉ trình bày, không đổi chỉ số).
+      Phòng Lễ Hội: skin xe luôn là cầu vồng; đạn/map/đại bàng vẫn theo Tủ đồ. */
+  async cosFor(account) {
+    let c = { tank: null, bullet: null, eagle: null, map: null };
+    try { if (account) c = await eco.loadout(this.env, account); } catch (err) { console.error('cos', err && err.message); }
+    if (this.festival) c.tank = eco.FESTIVAL_SKIN;
+    return c;
   }
 
   createRoom(code, opts) {
@@ -209,13 +221,12 @@ export class TankRoom {
         if (ws.playerId || ws.joining) return;
         ws.joining = true;
         // Mọi truy vấn D1 làm TRƯỚC khi đụng vào phòng, để phần dưới chạy liền một mạch.
-        let account = null, festival = false, skin = null;
+        let account = null, festival = false, cos = null;
         try {
           account = await (ws.accountP || null);
           // Phòng Lễ Hội: host mua lượt, tạo phòng với opts.festival -> tiêu 1 lượt trước khi tạo
           if (m.t === 'create' && m.opts && m.opts.festival === true && !this.mod) festival = await eco.consumeFestival(this.env, account);
-          if (festival || (m.t === 'join' && this.festival)) skin = eco.FESTIVAL_SKIN;
-          else if (account) skin = eco.pickSkin(await eco.entitlements(this.env, account), false);
+          if (account) cos = await eco.loadout(this.env, account);
         } catch (err) { console.error('entitlements', err && err.message); }
         finally { ws.joining = false; }
         if (ws.readyState !== undefined && ws.readyState > 1) return;   // đã đóng trong lúc chờ D1
@@ -230,12 +241,13 @@ export class TankRoom {
         if (this.players.size >= MAX_PLAYERS) return this.send(ws, { t: 'err', code: 'ROOM_FULL' });
         if (this.emptyTimer) { clearTimeout(this.emptyTimer); this.emptyTimer = null; }
         const p = { id: rid('pl'), name: String(m.name || '').slice(0, 12), isHost: this.players.size === 0, session: rid('s'), ws, account };
-        p.skin = this.festival ? eco.FESTIVAL_SKIN : skin;
+        p.cos = Object.assign({ tank: null, bullet: null, eagle: null, map: null }, cos);
+        if (this.festival) p.cos.tank = eco.FESTIVAL_SKIN;
         this.players.set(p.id, p); this.sessions.set(p.session, p.id);
         ws.playerId = p.id;
         this.welcome(ws, p);
         for (const q of this.players.values()) if (q.ws && q !== p) this.send(q.ws, { t: 'join', p: { id: p.id, name: p.name } });
-        this.mod.onJoin(this.room, { id: p.id, name: p.name, isHost: p.isHost, skin: p.skin });
+        this.mod.onJoin(this.room, { id: p.id, name: p.name, isHost: p.isHost, cos: p.cos });
         this.broadcastSnap();
         return;
       }
@@ -255,7 +267,7 @@ export class TankRoom {
         if (this.mod) this.send(ws, '{"t":"snap","seq":' + this.seq + ',"s":' + JSON.stringify(this.room.state) + '}');
         return;
       case 'msg': {
-        if (String(m.n) === 'skin') return;          // skin chỉ do server đặt (từ entitlement)
+        if (String(m.n) === 'skin' || String(m.n) === 'cos') return;   // cosmetic chỉ do server đặt (từ entitlement + Tủ đồ)
         const p = ws.playerId && this.players.get(ws.playerId);
         if (p && this.mod) this.mod.onMessage(this.room, { id: p.id, name: p.name, isHost: p.isHost }, String(m.n), m.d);
         return;
