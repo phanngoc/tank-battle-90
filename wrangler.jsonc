@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tank-battle-90",
+  "main": "cf/worker.mjs",
+  "compatibility_date": "2026-11-02",
+  "observability": { "enabled": true },
+  "workers_dev": true,
+  // Chỉ bật khi playtest trên *.workers.dev đã pass (xem cf/README.md):
+  // "routes": [{ "pattern": "tank.bomclaw.org", "custom_domain": true }],
+  "assets": { "directory": "public", "binding": "ASSETS", "run_worker_first": ["/v1/*", "/ws"] },
+  "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "TankRoom" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TankRoom"] }]
+}

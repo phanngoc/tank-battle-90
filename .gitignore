@@ -4,3 +4,5 @@ npm-debug.log*
 .DS_Store
 shot*.png
 .gstack/
+.wrangler/
+node_modules
