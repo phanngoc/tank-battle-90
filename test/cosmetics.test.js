@@ -150,17 +150,23 @@ test('phòng lễ hội: một lượt mua = một phòng; skin ưu tiên', asyn
   assert.equal(e.pickSkin([], true), 'tank.room.festival');
   assert.equal(e.pickSkin(['tank.skin.jade', 'tank.skin.gold'], false), 'tank.skin.gold');
   assert.equal(e.pickSkin([], false), null);
-  for (const d of Object.values(e.SKUS)) assert.equal(d.kind, 'cosmetic');
+  // không SKU nào mang chỉ số: chỉ cosmetic hoặc combo của cosmetic
+  const STAT = /speed|damage|hp|armor|bullet(Speed|s)|lives|power/i;
+  for (const [sku, d] of Object.entries(e.SKUS)) {
+    assert.ok(d.kind === 'cosmetic' || d.kind === 'bundle', sku);
+    for (const k of Object.keys(d)) assert.ok(!STAT.test(k), sku + ' có trường ' + k);
+    for (const i of d.items || []) assert.equal(e.SKUS[i].kind, 'cosmetic', sku + ' gồm ' + i);
+  }
 });
 
 /** Chơi cùng một kịch bản có định trước; trả về toàn bộ chỉ số xe + điểm theo thời gian. */
-function playScript(skins) {
+function playScript(skins, cos = []) {
   const r = createRoom();
   let seed = 42;   // Math.random có định trong vm context của phòng (Math của test không bị đụng)
   const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
   require('node:vm').runInContext('Math = Object.assign(Object.create(Math), { random: __r })', Object.assign(r.ctx, { __r: rnd }));
   const ps = [];
-  for (let i = 0; i < 4; i++) { const p = { id: 'p' + i, name: 'P' + i, isHost: i === 0, skin: skins[i] }; r.mod.onJoin(r.room, p); ps.push(p); }
+  for (let i = 0; i < 4; i++) { const p = { id: 'p' + i, name: 'P' + i, isHost: i === 0, skin: skins[i], cos: cos[i] }; r.mod.onJoin(r.room, p); ps.push(p); }
   const trace = [];
   for (let t = 0; t < 600; t++) {
     ps.forEach((p, i) => r.msg(p, 'input', { dir: (t >> 5) % 4, moving: true, fire: (t + i) % 7 === 0 }));
@@ -179,8 +185,89 @@ test('skin KHÔNG đổi chỉ số: cùng kịch bản, có/không entitlement 
   assert.deepEqual(dressed.trace, plain.trace);
   assert.deepEqual(plain.state.skins, {});
   assert.deepEqual(dressed.state.skins, { 0: 'tank.skin.gold', 1: 'tank.skin.jade', 2: 'tank.pass.coop', 3: 'tank.room.festival' });
-  const strip = (s) => { const c = JSON.parse(JSON.stringify(s)); delete c.skins; return c; };
+  const strip = (s) => { const c = JSON.parse(JSON.stringify(s)); delete c.skins; delete c.cos; delete c.roomCos; return c; };
   assert.deepEqual(strip(dressed.state), strip(plain.state), 'state ngoài skins giống hệt');
+});
+
+const FULL = [
+  { tank: 'tank.skin.dragon', bullet: 'tank.bullet.dragon', eagle: 'tank.eagle.phoenix', map: 'tank.map.neon' },
+  { tank: 'tank.skin.neon', bullet: 'tank.bullet.plasma', eagle: 'tank.eagle.lac', map: 'tank.map.tet' },
+  { tank: 'tank.skin.camo', bullet: 'tank.bullet.laser' },
+  { bullet: 'tank.bullet.firework' },
+];
+test('full cosmetic 4 slot KHÔNG đổi chỉ số; đồng đội thấy xe+đạn, map/đại bàng theo chủ phòng', () => {
+  const plain = playScript([null, null, null, null]);
+  const dressed = playScript([null, null, null, null], FULL);
+  assert.deepEqual(dressed.trace, plain.trace);
+  const strip = (s) => { const c = JSON.parse(JSON.stringify(s)); delete c.skins; delete c.cos; delete c.roomCos; return c; };
+  assert.deepEqual(strip(dressed.state), strip(plain.state));
+  assert.deepEqual(dressed.state.cos, { 0: { tank: 'tank.skin.dragon', bullet: 'tank.bullet.dragon' }, 1: { tank: 'tank.skin.neon', bullet: 'tank.bullet.plasma' },
+    2: { tank: 'tank.skin.camo', bullet: 'tank.bullet.laser' }, 3: { bullet: 'tank.bullet.firework' } });
+  assert.deepEqual(dressed.state.roomCos, { eagle: 'tank.eagle.phoenix', map: 'tank.map.neon' }, 'map/đại bàng của slot 0 (chủ phòng)');
+  assert.deepEqual(plain.state.roomCos, { eagle: null, map: null });
+});
+
+test('chủ phòng rời đi -> map/đại bàng theo chủ mới; cos sai slot bị bỏ', () => {
+  const r = createRoom();
+  const a = { id: 'a', name: 'A', isHost: true, cos: FULL[0] }, b = { id: 'b', name: 'B', cos: FULL[1] };
+  r.mod.onJoin(r.room, a); r.mod.onJoin(r.room, b); r.tick(1);
+  assert.equal(r.room.state.roomCos.map, 'tank.map.neon');
+  r.mod.onLeave(r.room, a); r.tick(1);
+  assert.deepEqual({ ...r.room.state.roomCos }, { eagle: 'tank.eagle.lac', map: 'tank.map.tet' });
+  const c = { id: 'c', name: 'C', cos: { tank: 'tank.bullet.laser', bullet: 'tank.skin.gold', map: 'hack', eagle: 1 } };
+  r.mod.onJoin(r.room, c); r.tick(1);
+  assert.equal(r.room.state.cos[0], undefined, 'SKU sai slot không được nhận');
+  r.msg(b, 'cos', { cos: { tank: 'tank.skin.gold' } }); r.tick(1);   // không trusted
+  assert.equal(r.room.state.cos[1].tank, 'tank.skin.neon');
+});
+
+test('combo: giá trừ món đã có, cấp đủ món đúng một lần, Tân Binh 1 lần', async () => {
+  const e = await eco(); const env = envOf();
+  const { playerId } = await e.newGuest(env);
+  const buy = async (sku) => { const o = await e.createOrder(env, playerId, sku); if (o.status !== 200) return o; await e.sandboxConfirm(env, playerId, o.body.orderId); return o; };
+  const price = async (sku) => (await e.shop(env, playerId)).find((x) => x.sku === sku).price;
+  assert.equal(await price('tank.bundle.dragon'), 89000);
+  assert.equal(await price('tank.bundle.neon'), 61000);
+  await buy('tank.bullet.plasma');                                     // mua lẻ trước
+  assert.equal(await price('tank.bundle.neon'), Math.round(0.7 * (39000 + 29000) / 1000) * 1000);
+  const o = await buy('tank.bundle.neon');
+  assert.equal(o.body.amount, 48000);
+  const own = await e.entitlements(env, playerId);
+  for (const i of ['tank.skin.neon', 'tank.bullet.plasma', 'tank.map.neon']) assert.ok(own.includes(i), i);
+  const n = (await env.DB.prepare("SELECT COUNT(*) AS n FROM entitlements WHERE sku = 'tank.bullet.plasma'").first()).n;
+  assert.equal(n, 1, 'món đã có không cấp lại');
+  assert.equal((await e.sandboxConfirm(env, playerId, o.body.orderId)).body.duplicate, true);
+  assert.equal(await price('tank.bundle.neon'), null);
+  assert.equal((await e.createOrder(env, playerId, 'tank.bundle.neon')).status, 409);
+  assert.equal(await price('tank.bundle.rookie'), 15000);
+  await buy('tank.bundle.rookie');
+  assert.equal((await e.createOrder(env, playerId, 'tank.bundle.rookie')).status, 409, 'Tân Binh chỉ 1 lần');
+});
+
+test('theo mùa: Tết chỉ bán 01/01–28/02 (giờ VN)', async () => {
+  const e = await eco(); const env = envOf();
+  const { playerId } = await e.newGuest(env);
+  const nov = Date.UTC(2026, 10, 13), jan = Date.UTC(2027, 0, 10);
+  assert.equal((await e.createOrder(env, playerId, 'tank.map.tet', nov)).body.error, 'OUT_OF_SEASON');
+  assert.equal((await e.createOrder(env, playerId, 'tank.bundle.tet', nov)).body.error, 'OUT_OF_SEASON');
+  assert.equal((await e.createOrder(env, playerId, 'tank.map.tet', jan)).status, 200);
+  assert.equal((await e.shop(env, playerId, nov)).find((x) => x.sku === 'tank.map.tet').onSale, false);
+  assert.equal(e.inSeason(e.SKUS['tank.map.tet'], Date.UTC(2026, 11, 31, 18)), true, '01/01 01:00 giờ VN');
+});
+
+test('Tủ đồ: chỉ trang bị món đã có, bỏ trang bị, còn sau khi đọc lại; người cũ giữ skin tự chọn', async () => {
+  const e = await eco(); const env = envOf();
+  const { playerId } = await e.newGuest(env);
+  assert.equal((await e.setLoadout(env, playerId, 'bullet', 'tank.bullet.fire')).status, 403);
+  assert.equal((await e.setLoadout(env, playerId, 'tank', 'tank.bullet.fire')).status, 400);
+  assert.equal((await e.setLoadout(env, playerId, 'hat', null)).status, 400);
+  for (const sku of ['tank.skin.jade', 'tank.bullet.fire', 'tank.map.snow']) { const o = await e.createOrder(env, playerId, sku); await e.sandboxConfirm(env, playerId, o.body.orderId); }
+  assert.equal((await e.loadout(env, playerId)).tank, 'tank.skin.jade', 'chưa chọn -> skin tự chọn như cũ');
+  assert.equal((await e.loadout(env, playerId)).bullet, null, 'đạn không tự trang bị');
+  await e.setLoadout(env, playerId, 'bullet', 'tank.bullet.fire');
+  await e.setLoadout(env, playerId, 'map', 'tank.map.snow');
+  await e.setLoadout(env, playerId, 'tank', null);
+  assert.deepEqual(await e.loadout(env, playerId), { tank: null, bullet: 'tank.bullet.fire', eagle: null, map: 'tank.map.snow' });
 });
 
 test('skin lạ / client tự gửi skin bị bỏ qua', () => {
