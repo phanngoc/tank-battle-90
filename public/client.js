@@ -8,7 +8,7 @@ const DIR = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 let TILE = 16, COLS = 26, ROWS = 26, FIELD_W = 416, FIELD_H = 416;
 
 const cv = document.getElementById('game');
-const ctx = cv.getContext('2d');
+let ctx = cv.getContext('2d');   // let: preview cửa hàng mượn tạm các hàm vẽ
 ctx.imageSmoothingEnabled = false;
 
 // offscreen layers
@@ -137,6 +137,7 @@ function wireRoom(r) {
 
   r.onState(function (s) {
     skinsBySlot = (s && s.skins) || {};
+    applyCos(s);
     if (s.dims && !canvasReady) {
       canvasReady = true;
       TILE = s.dims.tile; COLS = s.dims.cols; ROWS = s.dims.rows;
@@ -302,8 +303,8 @@ function bakeTile(c, r, t) {
 }
 
 function drawBrick(g, x, y) {
-  g.fillStyle = '#7a2f16'; g.fillRect(x, y, TILE, TILE);
-  g.fillStyle = '#a5502a';
+  g.fillStyle = TH.brick[0]; g.fillRect(x, y, TILE, TILE);
+  g.fillStyle = TH.brick[1];
   const bh = TILE / 4;
   for (let i = 0; i < 4; i++) {
     const off = (i % 2) * (TILE / 4);
@@ -312,12 +313,12 @@ function drawBrick(g, x, y) {
   }
 }
 function drawSteel(g, x, y) {
-  g.fillStyle = '#8a8f9c'; g.fillRect(x, y, TILE, TILE);
-  g.fillStyle = '#c3c8d4'; g.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
-  g.fillStyle = '#6b7280';
+  g.fillStyle = TH.steel[0]; g.fillRect(x, y, TILE, TILE);
+  g.fillStyle = TH.steel[1]; g.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
+  g.fillStyle = TH.steel[2];
   g.fillRect(x + TILE / 2 - 1, y + 1, 2, TILE - 2);
   g.fillRect(x + 1, y + TILE / 2 - 1, TILE - 2, 2);
-  g.fillStyle = '#eef1f6';
+  g.fillStyle = TH.steel[3];
   g.fillRect(x + 2, y + 2, 2, 2); g.fillRect(x + TILE - 4, y + 2, 2, 2);
   g.fillRect(x + 2, y + TILE - 4, 2, 2); g.fillRect(x + TILE - 4, y + TILE - 4, 2, 2);
 }
@@ -328,13 +329,13 @@ function drawIce(g, x, y) {
   g.beginPath(); g.moveTo(x + 10, y + 2); g.lineTo(x + 13, y + 7); g.lineTo(x + 9, y + 12); g.stroke();
 }
 function drawForest(g, x, y) {
-  g.fillStyle = '#1f7a2e'; g.fillRect(x, y, TILE, TILE);
-  g.fillStyle = '#33a349';
+  g.fillStyle = TH.forest[0]; g.fillRect(x, y, TILE, TILE);
+  g.fillStyle = TH.forest[1];
   for (let i = 0; i < 6; i++) {
     const bx = x + (i * 5 % TILE), by = y + ((i * 7) % TILE);
     g.fillRect(bx, by, 4, 4);
   }
-  g.fillStyle = '#146b26';
+  g.fillStyle = TH.forest[2];
   g.fillRect(x + 3, y + 8, 3, 3); g.fillRect(x + 10, y + 3, 3, 3);
 }
 
@@ -368,7 +369,7 @@ function render() {
   pickFrame(performance.now() - INTERP_DELAY);
   const b = frame.b, a = frame.a, al = frame.al;
 
-  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, FIELD_W, FIELD_H);
+  drawGround(0, 0, FIELD_W, FIELD_H, tick);
   ctx.drawImage(terrain, 0, 0);
   drawWater(tick);
   drawBase(b);
@@ -388,7 +389,9 @@ function render() {
     for (const e of b.effects) drawEffect(e);
   }
 
+  for (const f of clientFx) drawClientFx(f);
   ctx.drawImage(forest, 0, 0); // bushes conceal tanks underneath
+  drawMapOverlay(0, 0, FIELD_W, FIELD_H, tick);
 
   if (b && b.frozen) { ctx.fillStyle = 'rgba(120,190,255,.10)'; ctx.fillRect(0, 0, FIELD_W, FIELD_H); }
   if (statusText === 'stageclear') drawBanner('STAGE ' + (latest ? latest.stage : ''), 'CLEAR!');
@@ -398,22 +401,25 @@ function drawWater(tick) {
   const phase = Math.floor(tick / 8) % 2;
   for (const w of waterTiles) {
     const x = w.c * TILE, y = w.r * TILE;
-    ctx.fillStyle = '#1c4fa0'; ctx.fillRect(x, y, TILE, TILE);
-    ctx.fillStyle = '#3a76d6';
+    ctx.fillStyle = TH.water[0]; ctx.fillRect(x, y, TILE, TILE);
+    ctx.fillStyle = TH.water[1];
     const o = phase ? 0 : 4;
     ctx.fillRect(x + o, y + 3, 6, 2);
     ctx.fillRect(x + ((o + 8) % TILE), y + 9, 6, 2);
   }
 }
 
-function drawBase(state) {
+function drawBase(state, bx0, by0, eagleSku) {
   // eagle sits on tiles cols12-13 rows24-25 (px 192..224 , 384..416) for 26x26
-  const bx = 12 * TILE, by = (ROWS - 2) * TILE, s = TILE * 2;
+  const bx = bx0 !== undefined ? bx0 : 12 * TILE, by = by0 !== undefined ? by0 : (ROWS - 2) * TILE, s = TILE * 2;
   const alive = !state || !state.base ? true : state.base.alive;
+  const tick = latest ? latest.tick : Math.floor(performance.now() / 33);
+  const sku = eagleSku !== undefined ? eagleSku : roomCos.eagle;
   // pedestal
   ctx.fillStyle = alive ? '#2a2f45' : '#241b1b';
   ctx.fillRect(bx, by, s, s);
   const cx = bx + s / 2, cy = by + s / 2;
+  if (sku && EAGLES[sku]) { EAGLES[sku](bx, by, s, alive, tick); return; }
   if (alive) {
     // stylised eagle emblem
     ctx.fillStyle = '#e9c94a';
@@ -446,7 +452,7 @@ function drawTank(t, tick, frozen, px, py) {
   const x = px, y = py, s = TILE * 2;
   // spawn materialise animation
   if (t.sp) { drawSpawnStar(x + s / 2, y + s / 2, tick); return; }
-  const skin = t.k === 'p' ? skinsBySlot[t.slot] : null;
+  const skin = t.k === 'p' ? (t.pv !== undefined ? t.pv : (cosBySlot[t.slot] && cosBySlot[t.slot].tank) || skinsBySlot[t.slot]) : null;
   let col = t.k === 'p' ? skinColor(skin, tick) || t.c : enemyColor(t, tick);
   if (t.k === 'e' && frozen) col = shade(col, -30);
   const dark = shade(col, -60);
@@ -506,6 +512,8 @@ function drawSpawnStar(cx, cy, tick) {
 }
 
 function drawBullet(b, x, y) {
+  const sku = b.pv !== undefined ? b.pv : (b.s !== undefined && cosBySlot[b.s] ? cosBySlot[b.s].bullet : null);
+  if (sku && BULLETS[sku]) { BULLETS[sku].draw(x, y, b.d, performance.now() / 33); return; }
   ctx.fillStyle = '#fff';
   ctx.fillRect(x, y, 8, 8);
   ctx.fillStyle = '#ffd23f';
@@ -760,9 +768,60 @@ connect();
 render();
 
 
-// ═══ Mỹ phẩm: skin chỉ đổi MÀU/hoạ tiết, server không đổi chỉ số nào ═══════════
+// ═══ Mỹ phẩm (docs/tank-cosmetics-shop.md): CHỈ vẽ — server/engine không đổi chỉ số nào ═══
+// tank/bullet: theo slot người chơi (state.cos) · eagle/map: của phòng, theo chủ phòng (state.roomCos)
 let skinsBySlot = {};
-const SKIN_COLORS = { 'tank.skin.jade': '#36c79a', 'tank.skin.gold': '#f2c230', 'tank.pass.coop': '#8a7dff' };
+let cosBySlot = {};
+let roomCos = { eagle: null, map: null };
+let lastMapSku = null;
+const clientFx = [];                 // hiệu ứng chỉ ở client (đạn cosmetic trúng mục tiêu)
+let lastBullets = new Map();         // id -> {x,y,sku}
+
+function applyCos(s) {
+  cosBySlot = (s && s.cos) || {};
+  // phòng cũ chỉ có skins -> coi như skin xe
+  if (s && !s.cos && s.skins) { cosBySlot = {}; for (const k in s.skins) cosBySlot[k] = { tank: s.skins[k] }; }
+  roomCos = (s && s.roomCos) || { eagle: null, map: null };
+  if ((roomCos.map || null) !== lastMapSku) {
+    lastMapSku = roomCos.map || null;
+    TH = THEMES[lastMapSku] || THEMES.classic;
+    if (grid && tctx) { tctx.clearRect(0, 0, FIELD_W, FIELD_H); fctx.clearRect(0, 0, FIELD_W, FIELD_H); waterTiles = []; for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) bakeTile(c, r, grid[r][c]); }
+  }
+  // đạn biến mất -> hiệu ứng trúng của kiểu đạn (client only)
+  const cur = new Map();
+  const bl = s && s.bullets ? Object.values(s.bullets) : [];
+  for (const b of bl) { const sku = b.s !== undefined && cosBySlot[b.s] ? cosBySlot[b.s].bullet : null; cur.set(b.id, { x: b.x, y: b.y, sku }); }
+  for (const [id, o] of lastBullets) if (!cur.has(id) && o.sku && BULLETS[o.sku] && BULLETS[o.sku].hit) clientFx.push({ sku: o.sku, x: o.x + 4, y: o.y + 4, a: 0 });
+  lastBullets = cur;
+  for (let i = clientFx.length - 1; i >= 0; i--) if (++clientFx[i].a > 14) clientFx.splice(i, 1);
+}
+
+// ---- Bản đồ: chỉ bảng màu/hoạ tiết; layout, va chạm, ô phá được giữ nguyên ----
+const THEMES = {
+  classic: { bg: '#000000', brick: ['#7a2f16', '#a5502a'], steel: ['#8a8f9c', '#c3c8d4', '#6b7280', '#eef1f6'], water: ['#1c4fa0', '#3a76d6'], forest: ['#1f7a2e', '#33a349', '#146b26'] },
+  'tank.map.jungle': { bg: '#0f2a17', brick: ['#3e4a2a', '#6f7d4a'], steel: ['#5d6b66', '#a9b8b1', '#46524d', '#dbe7e1'], water: ['#0e5b4f', '#2fa38a'], forest: ['#0d5a1f', '#2b9c3f', '#08401a'] },
+  'tank.map.desert': { bg: '#c9a46a', brick: ['#8a5a2b', '#c08848'], steel: ['#6e4a35', '#a27357', '#5a3a28', '#e0b28f'], water: ['#1f7f8f', '#4cc3cf'], forest: ['#6d7f2a', '#a3b443', '#4e5c1b'] },
+  'tank.map.snow': { bg: '#d9e6f2', brick: ['#5f86b5', '#9cc3ea'], steel: ['#2f3747', '#59657d', '#1c222d', '#9aa6bd'], water: ['#2a5fa8', '#7fb2ee'], forest: ['#2d5a4a', '#e8f2f8', '#1e4537'], snow: true },
+  'tank.map.neon': { bg: '#0a0618', brick: ['#3a0c3c', '#ff3fae'], steel: ['#073042', '#0b5d78', '#041c28', '#4ff0ff'], water: ['#2a0f5c', '#8a5cff'], forest: ['#0d3b2a', '#1fe08a', '#062618'], grid: '#1b1240' },
+  'tank.map.tet': { bg: '#4a0d0d', brick: ['#8c1f1f', '#d9443a'], steel: ['#7a5a12', '#d4a52a', '#5a420c', '#ffe58a'], water: ['#123f7a', '#3f86d6'], forest: ['#6b3a12', '#ffd23f', '#a85a1a'] },
+};
+let TH = THEMES.classic;
+function drawGround(x0, y0, w, h, tick) {
+  ctx.fillStyle = TH.bg; ctx.fillRect(x0, y0, w, h);
+  if (TH.grid) { ctx.fillStyle = TH.grid; for (let x = 0; x < w; x += TILE) ctx.fillRect(x0 + x, y0, 1, h); for (let y = 0; y < h; y += TILE) ctx.fillRect(x0, y0 + y, w, 1); }
+}
+function drawMapOverlay(x0, y0, w, h, tick) {
+  if (!TH.snow) return;
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';          // tuyết rơi mờ, không che xe
+  for (let i = 0; i < 40; i++) {
+    const x = (i * 97 + tick * (1 + i % 3)) % w, y = (i * 53 + tick * 2) % h;
+    ctx.fillRect(x0 + x, y0 + y, 2, 2);
+  }
+}
+
+// ---- Xe tăng: màu nền + hoạ tiết ----
+const SKIN_COLORS = { 'tank.skin.jade': '#36c79a', 'tank.skin.gold': '#f2c230', 'tank.pass.coop': '#8a7dff',
+  'tank.skin.camo': '#5b6b3a', 'tank.skin.desert': '#d4b98a', 'tank.skin.carbon': '#34343c', 'tank.skin.neon': '#1c2240', 'tank.skin.dragon': '#9b1c1c' };
 function skinColor(skin, tick) {
   if (!skin) return null;
   if (skin === 'tank.room.festival') return hslHex((tick * 4) % 360, 0.8, 0.6);
@@ -774,10 +833,106 @@ function hslHex(h, s, l) {
   return '#' + f(0) + f(8) + f(4);
 }
 function drawSkinMark(skin, x, y, s, tick) {
-  if (skin === 'tank.skin.gold') { ctx.fillStyle = '#fff6c2'; ctx.fillRect(x + s / 2 - 1, y + 9, 2, 2); }
-  else if (skin === 'tank.skin.jade') { ctx.fillStyle = '#c9ffe9'; ctx.fillRect(x + 9, y + s - 11, 2, 2); }
+  if (skin === 'tank.skin.gold') {
+    ctx.fillStyle = '#fff6c2'; ctx.fillRect(x + s / 2 - 1, y + 9, 2, 2);
+    const k = (tick % 60); if (k < 18) { ctx.fillStyle = 'rgba(255,255,230,0.8)'; ctx.fillRect(x + 7 + k, y + 7, 2, s - 14); }
+  } else if (skin === 'tank.skin.jade') { ctx.fillStyle = '#c9ffe9'; ctx.fillRect(x + 9, y + s - 11, 2, 2); }
   else if (skin === 'tank.pass.coop') { ctx.fillStyle = '#ffffff'; ctx.fillRect(x + 9, y + 9, 3, 1); ctx.fillRect(x + s - 12, y + s - 10, 3, 1); }
   else if (skin === 'tank.room.festival' && Math.floor(tick / 6) % 2) { ctx.fillStyle = '#ffe14d'; ctx.fillRect(x + 3, y + 3, 2, 2); ctx.fillRect(x + s - 5, y + s - 5, 2, 2); }
+  else if (skin === 'tank.skin.camo') {
+    ctx.fillStyle = '#3a2a1a'; ctx.fillRect(x + 8, y + 9, 5, 3); ctx.fillRect(x + s - 13, y + s - 13, 5, 4);
+    ctx.fillStyle = '#1a1f12'; ctx.fillRect(x + s - 12, y + 9, 3, 3); ctx.fillRect(x + 9, y + s - 12, 4, 2);
+  } else if (skin === 'tank.skin.desert') {
+    ctx.fillStyle = '#a8865a'; for (let i = 0; i < 4; i++) ctx.fillRect(x + 8 + i * 4, y + s - 10 - i * 4, 3, 2);
+  } else if (skin === 'tank.skin.carbon') {
+    ctx.strokeStyle = '#d63a3a'; ctx.lineWidth = 1; ctx.strokeRect(x + 7.5, y + 7.5, s - 15, s - 15);
+    ctx.fillStyle = '#4a4a55'; for (let i = 0; i < 3; i++) ctx.fillRect(x + 9 + i * 5, y + 9 + i * 5, 2, 2);
+    if (Math.floor(tick / 10) % 3 === 0) { ctx.fillStyle = '#ff6b6b'; ctx.fillRect(x + s / 2 - 1, y + s / 2 - 1, 2, 2); }
+  } else if (skin === 'tank.skin.neon') {
+    const p = (Math.sin(tick / 6) + 1) / 2;
+    ctx.strokeStyle = 'rgba(79,240,255,' + (0.5 + p * 0.5) + ')'; ctx.lineWidth = 2; ctx.strokeRect(x + 7, y + 7, s - 14, s - 14);
+    ctx.fillStyle = 'rgba(255,63,174,' + (0.4 + (1 - p) * 0.6) + ')'; ctx.fillRect(x + s / 2 - 2, y + s / 2 - 2, 4, 4);
+  } else if (skin === 'tank.skin.dragon') {
+    ctx.fillStyle = '#d9a22a'; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if ((i + j) % 2 === 0) ctx.fillRect(x + 9 + i * 5, y + 9 + j * 5, 3, 2);
+    ctx.fillStyle = 'rgba(80,80,80,0.5)'; const k = tick % 20; ctx.fillRect(x + 2 + (k % 5), y + s - 2 + (k >> 2) % 3, 3, 3);
+    ctx.fillStyle = '#ffb43a'; ctx.fillRect(x + s / 2 - 1, y + s / 2 - 1, 2, 2);
+  }
+}
+
+// ---- Đạn: lõi giữ đúng ô 8×8; vệt đuôi alpha ≤ 0.5, vẽ phía sau ----
+function trail(x, y, d, n, color, gap) {
+  const [dx, dy] = DIR[d || 0];
+  for (let i = 1; i <= n; i++) { ctx.globalAlpha = 0.5 * (1 - i / (n + 1)); ctx.fillStyle = color; ctx.fillRect(x + 2 - dx * i * gap, y + 2 - dy * i * gap, 4, 4); }
+  ctx.globalAlpha = 1;
+}
+function core(x, y, outer, inner) { ctx.fillStyle = outer; ctx.fillRect(x, y, 8, 8); ctx.fillStyle = inner; ctx.fillRect(x + 2, y + 2, 4, 4); }
+const BULLETS = {
+  'tank.bullet.laser': { draw: (x, y, d) => { trail(x, y, d, 3, '#4ff0ff', 4); core(x, y, '#bff9ff', '#4ff0ff'); } },
+  'tank.bullet.plasma': { draw: (x, y, d, t) => { trail(x, y, d, 2, '#a66bff', 4); core(x, y, '#e1c9ff', (t | 0) % 4 < 2 ? '#a66bff' : '#ffffff'); }, hit: '#a66bff' },
+  'tank.bullet.fire': { draw: (x, y, d, t) => { trail(x, y, d, 4, (t | 0) % 2 ? '#ff7a1a' : '#ffd23f', 3); core(x, y, '#ffb347', '#ff4b1a'); }, hit: '#ff7a1a' },
+  'tank.bullet.firework': { draw: (x, y, d, t) => { trail(x, y, d, 2, hslHex(((t | 0) * 20) % 360, 0.9, 0.6), 4); core(x, y, '#ffffff', hslHex(((t | 0) * 20) % 360, 0.9, 0.55)); }, hit: 'rainbow' },
+  'tank.bullet.meteor': { draw: (x, y, d) => { trail(x, y, d, 6, '#9fd8ff', 3); core(x, y, '#ffffff', '#6fb8ff'); }, hit: '#cfeaff' },
+  'tank.bullet.dragon': { draw: (x, y, d, t) => { trail(x, y, d, 5, (t | 0) % 2 ? '#7a7a7a' : '#ff5a1a', 3); core(x, y, '#ffd23f', '#d61f1f'); }, hit: '#ff3a1a' },
+};
+function drawClientFx(f) {
+  const b = BULLETS[f.sku]; if (!b || !b.hit) return;
+  const r = 3 + f.a * 1.2; ctx.globalAlpha = Math.max(0, 1 - f.a / 14);
+  for (let i = 0; i < 6; i++) {
+    const a = i * Math.PI / 3;
+    ctx.fillStyle = b.hit === 'rainbow' ? hslHex(i * 60, 0.9, 0.6) : b.hit;
+    ctx.fillRect(f.x + Math.cos(a) * r - 1, f.y + Math.sin(a) * r - 1, 3, 3);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ---- Đại bàng: cùng ô 2×2, khi bị phá có sprite đổ nát riêng ----
+function eagleShape(cx, by, s, body, head) {
+  const cy = by + s / 2;
+  ctx.fillStyle = body; ctx.beginPath();
+  ctx.moveTo(cx, by + 6); ctx.lineTo(cx - 11, cy + 4); ctx.lineTo(cx - 4, cy + 4); ctx.lineTo(cx - 6, by + s - 5);
+  ctx.lineTo(cx + 6, by + s - 5); ctx.lineTo(cx + 4, cy + 4); ctx.lineTo(cx + 11, cy + 4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = head; ctx.fillRect(cx - 2, by + 5, 4, 5);
+}
+function ruin(bx, by, s, color) { ctx.fillStyle = color; for (let i = 0; i < 6; i++) ctx.fillRect(bx + 4 + (i * 7) % (s - 8), by + s - 8 - (i % 3) * 4, 5, 3); }
+const EAGLES = {
+  'tank.eagle.golden': (bx, by, s, alive, t) => { if (!alive) return ruin(bx, by, s, '#7a5a12'); eagleShape(bx + s / 2, by, s, '#f2c230', '#fff6c2'); ctx.strokeStyle = '#8a5a12'; ctx.lineWidth = 1; ctx.strokeRect(bx + 3.5, by + 3.5, s - 7, s - 7); if (t % 40 < 8) { ctx.fillStyle = '#fff'; ctx.fillRect(bx + s / 2 + 5, by + 9, 2, 2); } },
+  'tank.eagle.ice': (bx, by, s, alive) => { if (!alive) return ruin(bx, by, s, '#7fb2ee'); eagleShape(bx + s / 2, by, s, '#bfe8ff', '#ffffff'); ctx.fillStyle = '#7fd0ff'; ctx.fillRect(bx + 5, by + s - 6, 3, 3); ctx.fillRect(bx + s - 8, by + s - 6, 3, 3); },
+  'tank.eagle.lac': (bx, by, s, alive) => {
+    if (!alive) return ruin(bx, by, s, '#3d6b5a');
+    const cx = bx + s / 2, cy = by + s / 2;
+    ctx.strokeStyle = '#6fa58c'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, cy, s / 2 - 3, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#9fd1b8'; for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; ctx.fillRect(cx + Math.cos(a) * 10 - 1, cy + Math.sin(a) * 10 - 1, 2, 2); }
+    ctx.fillStyle = '#4f8f75'; ctx.beginPath(); ctx.moveTo(cx - 10, cy + 2); ctx.lineTo(cx + 2, cy - 4); ctx.lineTo(cx + 11, cy - 9); ctx.lineTo(cx + 5, cy + 1); ctx.lineTo(cx - 4, cy + 5); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#d9f2e6'; ctx.fillRect(cx + 8, cy - 9, 2, 2);
+  },
+  'tank.eagle.phoenix': (bx, by, s, alive, t) => {
+    if (!alive) { ruin(bx, by, s, '#555'); return; }
+    const flap = Math.floor(t / 8) % 2, cx = bx + s / 2, cy = by + s / 2;
+    ctx.fillStyle = '#ff5a1a'; ctx.beginPath(); ctx.moveTo(cx, by + 5); ctx.lineTo(cx - 13, cy - (flap ? 6 : -2)); ctx.lineTo(cx - 4, cy + 4); ctx.lineTo(cx - 5, by + s - 4);
+    ctx.lineTo(cx + 5, by + s - 4); ctx.lineTo(cx + 4, cy + 4); ctx.lineTo(cx + 13, cy - (flap ? 6 : -2)); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffd23f'; ctx.fillRect(cx - 2, by + 5, 4, 5); ctx.fillRect(cx - 1, cy, 2, 8);
+    ctx.fillStyle = 'rgba(255,170,40,0.7)'; for (let i = 0; i < 3; i++) ctx.fillRect(bx + 6 + i * 9, by + 4 - ((t + i * 7) % 12) / 2, 2, 2);
+  },
+};
+
+// ---- Xem trước: mini-scene vẽ bằng ĐÚNG các hàm vẽ trong ván ----
+function drawPreview(g, look, tick) {
+  const W = g.canvas.width, H = g.canvas.height, saveCtx = ctx, saveTH = TH;
+  ctx = g; g.imageSmoothingEnabled = false;
+  TH = THEMES[look.map] || THEMES.classic;
+  try {
+    drawGround(0, 0, W, H, tick);
+    for (let c = 0; c < W / TILE; c++) { if (c % 5 < 2) drawBrick(g, c * TILE, 0); else if (c % 5 === 3) drawSteel(g, c * TILE, 0); }
+    const wx = W - TILE * 2; g.fillStyle = TH.water[0]; g.fillRect(wx, TILE * 2, TILE * 2, TILE); g.fillStyle = TH.water[1]; g.fillRect(wx + (tick >> 3) % 2 * 4, TILE * 2 + 3, 6, 2);
+    drawBase(null, (W - TILE * 2) / 2, H - TILE * 2, look.eagle || null);
+    const span = W - TILE * 4, k = (tick * 1.2) % (span * 2), tx = TILE + (k < span ? k : span * 2 - k);
+    const tank = { k: 'p', slot: 0, c: '#e9c94a', d: 0, pv: look.tank || '' };
+    drawTank(tank, tick, false, tx, TILE * 2.5);
+    const by = TILE * 2.5 - ((tick * 3) % (TILE * 1.5)) - 4;
+    drawBullet({ d: 0, pv: look.bullet || null }, tx + TILE - 4, by);
+    drawForest(g, 0, H - TILE, 0); drawForest(g, TILE, H - TILE);
+    drawMapOverlay(0, 0, W, H, tick);
+  } finally { ctx = saveCtx; TH = saveTH; }
 }
 
 // ═══ Cửa hàng + QR (SePay). Sandbox: nút xác nhận giả lập webhook ═══════════════

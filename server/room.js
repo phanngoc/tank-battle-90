@@ -651,7 +651,11 @@ class Game {
       et: t.enemyType || '', tc: t.tclass ?? -1, bo: t.bonus ? 1 : 0,
       hp: t.hp, mh: t.maxHp || 1,
     }));
-    const bullets = this.bullets.map(b => ({ id: b.id, x: b.x, y: b.y, d: b.dir }));
+    // s = slot người bắn (chỉ để client vẽ kiểu đạn cosmetic; engine không đọc lại)
+    const slotOfTank = {};
+    for (const t of this.tanks) if (t.kind === 'player') slotOfTank[t.id] = t.slot;
+    const bullets = this.bullets.map(b => (b.ownerKind === 'player' && slotOfTank[b.ownerId] !== undefined
+      ? { id: b.id, x: b.x, y: b.y, d: b.dir, s: slotOfTank[b.ownerId] } : { id: b.id, x: b.x, y: b.y, d: b.dir }));
     const powerups = this.powerups.map(p => ({ t: p.type, x: p.x, y: p.y }));
     const effects = this.effects.map(e => ({ k: e.kind, x: e.x, y: e.y, a: this.tick - e.born, l: e.life }));
     const players = [...this.players.values()].map(p => ({
