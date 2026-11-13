@@ -10,5 +10,9 @@
   "routes": [{ "pattern": "tank.bomclaw.org/*", "zone_name": "bomclaw.org" }],
   "assets": { "directory": "public", "binding": "ASSETS", "run_worker_first": ["/v1/*", "/ws"] },
   "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "TankRoom" }] },
+  // Entitlement/đơn hàng. database_id: điền sau `wrangler d1 create tank-entitlements`.
+  "d1_databases": [{ "binding": "DB", "database_name": "tank-entitlements", "database_id": "REPLACE_AFTER_D1_CREATE", "migrations_dir": "migrations" }],
+  // Sandbox mặc định. Thanh toán thật: đặt "true" + `wrangler secret put PAYMENT_CHECKSUM_KEY` và AUTH_SECRET.
+  "vars": { "PAYMENTS_LIVE": "false", "PAY_BANK": "MB", "PAY_ACCOUNT": "0000000000", "PAY_ACCOUNT_NAME": "ARCADE SANDBOX" },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TankRoom"] }]
 }
