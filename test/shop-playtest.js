@@ -109,10 +109,12 @@ function bot(code, token) {
     const code = await cdp.ev('myRoom');
     const jr = await fetch(URL + 'v1/rooms/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) }).then((r) => r.json());
     gate('phòng tồn tại: ' + code, !!jr.wsUrl, JSON.stringify(jr));
-    b = bot(code); await b.ready; await sleep(600);
+    b = bot(code); await b.ready;
+    for (let i = 0; i < 30 && !(b.state && b.state.cos && b.state.cos['0'] && b.state.cos['0'].bullet); i++) await sleep(200);
     gate('đồng đội thấy skin + đạn của mình', b.state && b.state.cos && b.state.cos['0'] && b.state.cos['0'].tank === 'tank.skin.camo' && b.state.cos['0'].bullet === 'tank.bullet.laser', JSON.stringify(b.state && b.state.cos));
     // bỏ trang bị đạn giữa phòng -> phòng cập nhật
-    await cdp.ev('api("PUT", "/v1/loadout", { slot: "bullet", sku: null, room: myRoom })'); await sleep(600);
+    await cdp.ev('api("PUT", "/v1/loadout", { slot: "bullet", sku: null, room: myRoom })');
+    for (let i = 0; i < 30 && b.state.cos['0'] && b.state.cos['0'].bullet; i++) await sleep(200);   // prod: DO đọc D1 rồi phát ở tick sau (~0.5s)
     gate('bỏ trang bị giữa phòng → đồng đội thấy ngay', b.state.cos['0'] && !b.state.cos['0'].bullet && b.state.cos['0'].tank === 'tank.skin.camo', JSON.stringify(b.state.cos));
     b.ws.send(JSON.stringify({ t: 'msg', n: 'cos', d: { cos: { tank: 'tank.skin.dragon' } } })); await sleep(400);
     gate('client không tự đặt cosmetic', !b.state.cos['1'], JSON.stringify(b.state.cos));
