@@ -117,6 +117,7 @@ function wireRoom(r) {
   room = r;
   myRoom = r.code;
   joined = true;
+  if (typeof syncItemBar === 'function') syncItemBar(1);
   setNet(true, '• online');
 
   r.onStatus(function (st) {
@@ -1089,6 +1090,7 @@ async function equip(slot, sku, card, tab, focusSku) {
   try { myLook = await api('PUT', '/v1/loadout', { slot, sku, room: joined && myRoom ? myRoom : undefined }); }
   catch (e) { toast('Không trang bị được: ' + (e.code || e.message)); return; }
   toast(sku ? 'Đã trang bị ✓' : 'Đã bỏ trang bị');
+  renderItemBar();
   shopItems = await api('GET', '/v1/shop').catch(() => shopItems);
   renderShop(card, tab, focusSku);
 }
@@ -1160,6 +1162,45 @@ async function buy(sku, card) {
   }
   pollTimer = setInterval(check, 3000);
 }
+// ── Thanh vật phẩm (điện thoại): 6 loại đạn. Đã có → chạm để dùng ngay trong trận (chạm lại = đạn mặc định);
+// chưa có → mờ + mở cửa hàng đúng món. Chỉ đổi hình đạn (cosmetic), không đổi luật/chỉ số.
+const IB_BULLETS = [['tank.bullet.laser', 'Laser', '#4ff0ff'], ['tank.bullet.plasma', 'Plasma', '#a66bff'], ['tank.bullet.fire', 'Lửa', '#ff7a1a'],
+  ['tank.bullet.firework', 'Pháo hoa', 'conic-gradient(#ff4b4b,#ffd23f,#4bff7a,#4fb8ff,#c24bff,#ff4b4b)'], ['tank.bullet.meteor', 'Sao băng', '#6fb8ff'], ['tank.bullet.dragon', 'Rồng', '#d61f1f']];
+const itemBar = document.getElementById('itemBar');
+let ibBusy = false;
+function renderItemBar() {
+  if (!itemBar) return;
+  itemBar.innerHTML = '';
+  for (const [sku, name, color] of IB_BULLETS) {
+    const it = itemOf(sku), have = isOwned(sku), on = myLook.bullet === sku;
+    const label = it && it.label ? it.label : name;
+    const st = on ? '● dùng' : have ? '✓ có' : '🔒 ' + (it && it.price ? Math.round(it.price / 1000) + 'k' : 'mua');
+    const b = el('button', { className: 'ib-btn' + (on ? ' on' : '') + (have ? '' : ' lock'), type: 'button' },
+      '<span class="ib-ic"></span><span class="ib-n">' + escapeHtml(label) + '</span><span class="ib-st">' + st + '</span>');
+    b.querySelector('.ib-ic').style.background = color;
+    b.querySelector('.ib-ic').style.color = color.startsWith('#') ? color : '#ffd23f';
+    b.dataset.sku = sku;
+    b.title = (have ? (on ? 'Đang dùng: ' : 'Dùng đạn ') : 'Mua đạn ') + label;
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.addEventListener('pointerdown', (e) => e.preventDefault());   // không cướp focus/không kéo trang khi đang lái
+    b.onclick = () => (have ? quickEquip(on ? null : sku) : openShop('bullet', sku));
+    itemBar.appendChild(b);
+  }
+}
+async function quickEquip(sku) {
+  if (ibBusy) return; ibBusy = true;
+  try { myLook = await api('PUT', '/v1/loadout', { slot: 'bullet', sku, room: joined && myRoom ? myRoom : undefined }); }
+  catch (e) { toast('Không đổi được đạn: ' + (e.code || e.message)); }
+  finally { ibBusy = false; renderItemBar(); }
+}
+// lúc mở trang phiên khách có thể chưa sẵn ⇒ thử lại vài lần; vào phòng xong cũng làm mới
+function syncItemBar(tries) {
+  loadShop().then(renderItemBar, () => { renderItemBar(); if (tries > 0) setTimeout(() => syncItemBar(tries - 1), 1500); });
+}
+renderItemBar();
+syncItemBar(4);
+const _closeShop = closeShop;
+closeShop = function () { _closeShop(); renderItemBar(); };
 (function mountShop() {
   const btn = el('button', { className: 'ov-btn ghost', id: 'shopBtn' }, '🛒 Cửa hàng');
   btn.onclick = () => openShop();
