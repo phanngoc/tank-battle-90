@@ -283,3 +283,10 @@ body.sheet-open { overflow: hidden; touch-action: none; }
 }
 .sheet-t { display: none; }
 @media (max-width: 719px), (orientation: landscape) and (max-height: 540px) { .sheet-t { display: block; } }
+
+/* Súng thật: rung 2px khi mình bắn tia, vòng hồi chiêu trên nút Laser, nhãn mode phòng */
+@keyframes tb-shake { 0%,100% { translate: 0 0; } 25% { translate: 2px -1px; } 50% { translate: -2px 1px; } 75% { translate: 1px 2px; } }
+canvas.shake { animation: tb-shake 120ms linear 1; }
+.ib-btn.cd::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: conic-gradient(rgba(10,12,24,.72) var(--cd, 0deg), transparent 0); }
+.mode-tag { font-size: 13px; margin: 6px 0; color: #bfe9ff; text-align: center; }
