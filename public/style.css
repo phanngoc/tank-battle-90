@@ -309,8 +309,8 @@ body.sheet-open { overflow: hidden; touch-action: none; }
 .up-n { flex: 1 1 auto; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .up-lv { flex: none; font-size: 12px; color: #cfd6ea; }
 .up-btn { flex: none; min-height: 44px; min-width: 96px; margin: 0; padding: 0 10px; font-size: 13px; width: auto; }
-.mode-row { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; width: 100%; max-width: 100%; }
-.mode-seg { display: flex; gap: 0; border: 1px solid #3a4258; border-radius: 10px; overflow: hidden; }
-.mode-seg button { min-height: 44px; padding: 0 14px; background: #262c3d; color: #cfd6ea; border: 0; font-size: 14px; cursor: pointer; }
+.mode-row { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; justify-content: center; width: 100%; max-width: 100%; }
+.mode-seg { flex: none; display: flex; gap: 0; border: 1px solid #3a4258; border-radius: 10px; overflow: hidden; }
+.mode-seg button { min-height: 44px; padding: 0 10px; background: #262c3d; color: #cfd6ea; border: 0; font-size: 14px; cursor: pointer; }
 .mode-seg button.on { background: #ffd23f; color: #1d2230; font-weight: 700; }
-.mode-stage { min-height: 44px; max-width: 100%; background: #262c3d; color: #fff; border: 1px solid #3a4258; border-radius: 10px; padding: 0 8px; font-size: 14px; }
+.mode-stage { flex: 0 1 auto; min-width: 0; min-height: 44px; max-width: 100%; background: #262c3d; color: #fff; border: 1px solid #3a4258; border-radius: 10px; padding: 0 8px; font-size: 14px; }

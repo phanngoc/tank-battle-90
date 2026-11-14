@@ -1247,7 +1247,7 @@ function renderModeRow(host) {
     '<button type="button" data-m="campaign" class="' + (camp ? 'on' : '') + '">Chiến dịch</button></div>';
   if (camp) {
     html += '<select id="stageSel" class="mode-stage">';
-    for (const st of prog.stages) if (st.n <= prog.unlocked) html += '<option value="' + st.n + '"' + (st.n === roomStage ? ' selected' : '') + '>Màn ' + st.n + (st.cleared ? ' ✓' : '') + ' · cấp KN ' + st.rec + '</option>';
+    for (const st of prog.stages) if (st.n <= prog.unlocked) html += '<option value="' + st.n + '"' + (st.n === roomStage ? ' selected' : '') + '>Màn ' + st.n + (st.cleared ? ' ✓' : '') + ' · KN' + st.rec + '</option>';
     html += '</select>';
   }
   if (modeRow.dataset.k === html + host) return;          // tránh vẽ lại mỗi snapshot (select đang mở)

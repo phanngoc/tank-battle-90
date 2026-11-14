@@ -73,4 +73,43 @@ await put('/v1/loadout', { slot: 'bullet', sku: null, room: H.code }, fan.access
 for (let i = 0; i < 30 && J.state.cos['0'] && J.state.cos['0'].bullet; i++) await sleep(200);
 ok('bỏ trang bị giữa phòng -> cập nhật', !J.state.cos['0'].bullet, JSON.stringify(J.state.cos));
 H.w.close(); J.w.close();
+
+// ── Progression v2 (sau PROGRESSION_ON). Cờ tắt: chỉ kiểm 404 + phòng luôn Chuẩn.
+//    Bật: wrangler dev --local --local-upstream 127.0.0.1:8787 --var PROGRESSION_ON:true
+{
+  const pl = (await req('POST', '/v1/auth/guest', {})).b, T = pl.accessToken;
+  const pr0 = await req('GET', '/v1/progress', null, T);
+  const ON = pr0.s === 200;
+  console.log('— progression: ' + (ON ? 'BẬT' : 'TẮT'));
+  if (!ON) {
+    ok('progression tắt -> 404 progression_off', pr0.s === 404 && pr0.b.error === 'progression_off');
+    ok('upgrade tắt -> 404', (await req('POST', '/v1/upgrade', { stat: 'move' }, T)).s === 404);
+    const R = await ws((await req('POST', '/v1/rooms/pick', {}, T)).b.wsUrl, T, { t: 'create', mode: 'coop', opts: { mode: 'campaign', campaignN: 1 }, name: 'P' });
+    await sleep(300);
+    R.w.send(JSON.stringify({ t: 'msg', n: 'option', d: { mode: 'campaign' } })); await sleep(300);
+    ok('cờ tắt: phòng luôn Chuẩn', R.state.mode === 'standard', R.state.mode);
+    R.w.close();
+  } else {
+    ok('progress cần auth', (await req('GET', '/v1/progress')).s === 401);
+    ok('progress mới: ví 0, cấp 1, mở màn 1, 24 màn có rec', pr0.b.wallet.gold === 0 && pr0.b.levels.move === 1 && pr0.b.unlocked === 1 && pr0.b.stages.length === 24 && pr0.b.stages.every((x) => x.rec >= 1), JSON.stringify(pr0.b.wallet));
+    ok('upgrade thiếu gold 409', (await req('POST', '/v1/upgrade', { stat: 'move' }, T)).b.error === 'NOT_ENOUGH_GOLD');
+    ok('sandbox-grant 💎', (await req('POST', '/v1/gems/sandbox-grant', { gems: 100 }, T)).b.wallet.gems === 100);
+    const cv = (await req('POST', '/v1/gems/convert', { gems: 10 }, T)).b;
+    ok('đổi 10💎 -> 1.000 gold', cv.wallet.gold === 1000 && cv.wallet.gems === 90 && cv.week.converted === 1000, JSON.stringify(cv.wallet));
+    ok('trần tuần 15.000', (await req('POST', '/v1/gems/convert', { gems: 141 }, T)).b.error === 'WEEKLY_CAP');
+    const up = (await req('POST', '/v1/upgrade', { stat: 'move' }, T)).b;
+    ok('upgrade move 1->2 trừ ' + pr0.b.upgradeCost[2], up.levels.move === 2 && up.wallet.gold === 1000 - pr0.b.upgradeCost[2], JSON.stringify(up.levels));
+    ok('stat lạ 400', (await req('POST', '/v1/upgrade', { stat: 'hp' }, T)).s === 400);
+    // phòng: chủ phòng chỉ vào màn ≤ max_cleared+1, levels lấy từ D1
+    const R = await ws((await req('POST', '/v1/rooms/pick', {}, T)).b.wsUrl, T, { t: 'create', mode: 'coop', opts: { mode: 'campaign', campaignN: 5 }, name: 'P' });
+    await sleep(300);
+    ok('tạo phòng campaign, màn 5 chưa mở -> giữ màn 1', R.state.mode === 'campaign' && R.state.campaignN === 1, R.state.mode + ':' + R.state.campaignN);
+    R.w.send(JSON.stringify({ t: 'msg', n: 'option', d: { campaignN: 2 } })); await sleep(300);
+    ok('option màn 2 (chưa mở) bị bỏ', R.state.campaignN === 1);
+    R.w.send(JSON.stringify({ t: 'msg', n: 'levels', d: { levels: { move: 10 } } }));
+    R.w.send(JSON.stringify({ t: 'msg', n: 'option', d: { mode: 'standard' } })); await sleep(300);
+    ok('option về Chuẩn', R.state.mode === 'standard');
+    R.w.close();
+  }
+}
 process.exit();
