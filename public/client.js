@@ -965,9 +965,13 @@ function closeShop() {
 }
 // bottom-sheet: thanh kéo + nút ✕ 44px (id shopClose) — gắn lại mỗi lần vẽ thẻ
 function sheetHead(card) {
-  card.appendChild(el('div', { className: 'sheet-handle' }));
+  // thanh trên dính (sticky): mobile = header toàn màn hình, desktop = thanh kéo; ✕ luôn thấy được khi cuộn
+  const bar = el('div', { className: 'sheet-bar' });
+  bar.appendChild(el('div', { className: 'sheet-handle' }));
+  bar.appendChild(el('div', { className: 'sheet-t' }, '🛒 Cửa hàng'));
   const x = el('button', { className: 'sheet-x', id: 'shopClose', type: 'button', title: 'Đóng' }, '✕');
-  x.setAttribute('aria-label', 'Đóng'); x.onclick = closeShop; card.appendChild(x);
+  x.setAttribute('aria-label', 'Đóng'); x.onclick = closeShop; bar.appendChild(x);
+  card.appendChild(bar);
 }
 window.addEventListener('keydown', (e) => { if (shopEl && e.key === 'Escape') { e.stopPropagation(); closeShop(); } }, true);
 async function loadShop() {
