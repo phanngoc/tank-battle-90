@@ -43,6 +43,19 @@ function isBonusIndex(i) { return i % 7 === 3; }
 // Friendly fire: a teammate's bullet stuns instead of killing.
 const STUN_TICKS = 2 * TICK_HZ;
 
+// Súng thật (docs/tank-weapons-design.md). Chỉ có tác dụng ở phòng mode 'casual'
+// (không BXH); mode 'standard' (mặc định, có BXH) luôn bắn đạn thường.
+// Key = SKU cửa hàng của kiểu đạn; người chơi dùng được khi đang trang bị SKU đó.
+const WEAPONS = {
+  'tank.bullet.laser': {
+    id: 'laser', beam: true,   // tia tức thì cùng tick tới vật cản đầu tiên
+    cooldown: 30,              // tick (1s)
+    targets: 1, damage: 1,     // cấp 1: 1 mục tiêu, −1 máu
+    breaksBrick: false,        // dừng ở gạch, không phá
+  },
+};
+const WEAPON_MODES = { casual: true };
+
 const ENEMY_TEMPLATE = {
   basic: { speed: 1, hp: 1, bulletSpeed: 4, score: 100, fireProb: 0.020, tclass: 0 },
   fast:  { speed: 2, hp: 1, bulletSpeed: 4, score: 200, fireProb: 0.020, tclass: 1 },
@@ -175,6 +188,16 @@ class Game {
     this.stageClearAt = 0;
     this.maxActive = maxActiveEnemies(1);
     this.friendlyFire = true;  // room option, toggled from the waiting room
+    this.mode = 'standard';    // 'standard' (BXH, đạn thường) | 'casual' (súng có tác dụng)
+    this.weaponOf = {};        // slot -> SKU kiểu đạn đang trang bị (room đặt từ cos)
+    this.beams = [];           // tia bắn trong tick này (chỉ để client vẽ)
+  }
+
+  setWeapon(slot, sku) { if (sku && WEAPONS[sku]) this.weaponOf[slot] = sku; else delete this.weaponOf[slot]; }
+  weaponFor(tank) {
+    if (tank.kind !== 'player' || !WEAPON_MODES[this.mode]) return null;
+    const sku = this.weaponOf[tank.slot];
+    return sku ? WEAPONS[sku] : null;
   }
 
   nextId() { return this.idCounter++; }
@@ -335,6 +358,8 @@ class Game {
   // ---- firing ----
   fire(tank) {
     if (tank.cooldown > 0) return;
+    const w = this.weaponFor(tank);
+    if (w && w.beam) return this.fireBeam(tank, w);
     const active = this.bullets.filter(b => b.ownerId === tank.id && !b.dead).length;
     if (active >= (tank.maxBullets || 1)) return;
     tank.cooldown = tank.fireCooldown || 12;
@@ -349,6 +374,44 @@ class Game {
       power: !!tank.canDestroySteel, dead: false,
     });
     this.emit('shoot');
+  }
+
+  // Tia laser: đi từng px (khung 8×8 như viên đạn) từ nòng tới vật cản đầu tiên.
+  // Xuyên nước/rừng/băng/đồng đội (không choáng) và đạn bay; dừng ở gạch (không phá),
+  // thép, mép sân, ô BASE (không phá đại bàng mình); hạ tối đa w.targets địch.
+  fireBeam(tank, w) {
+    tank.cooldown = w.cooldown;
+    const bw = 8, bh = 8;
+    const [dx, dy] = DIR[tank.dir];
+    let x = Math.round(tank.x + tank.w / 2 - bw / 2 + dx * (tank.w / 2));
+    let y = Math.round(tank.y + tank.h / 2 - bh / 2 + dy * (tank.h / 2));
+    const x1 = x + bw / 2, y1 = y + bh / 2;
+    const probe = { x, y, w: bw, h: bh };
+    let hits = 0, hitAt = null;
+    const maxSteps = FIELD_W + FIELD_H;
+    for (let s = 0; s < maxSteps; s++) {
+      if (probe.x < 0 || probe.y < 0 || probe.x + bw > FIELD_W || probe.y + bh > FIELD_H) break;
+      let stop = false;
+      for (const { c, r } of this.bulletOverlapTiles(probe)) {
+        const t = this.tileAt(c, r);
+        if (t === BRICK || t === STEEL || t === BASE || t === WALL) { stop = true; break; }
+      }
+      if (stop) break;
+      for (const t of this.tanks) {
+        if (t.dead || t.kind !== 'enemy' || t.spawnUntil > this.tick) continue;
+        if (probe.x < t.x + t.w && probe.x + bw > t.x && probe.y < t.y + t.h && probe.y + bh > t.y) {
+          this.damageEnemy(t, { ownerId: tank.id }, w.damage);
+          hits++;  // tia kết thúc ở tâm xe địch (theo trục tia)
+          hitAt = dx ? { x: t.x + t.w / 2, y: y1 } : { x: x1, y: t.y + t.h / 2 };
+          break;
+        }
+      }
+      if (hits >= w.targets) break;
+      probe.x += dx; probe.y += dy;
+    }
+    const end = hitAt || { x: probe.x - dx + bw / 2, y: probe.y - dy + bh / 2 };
+    this.beams.push({ x1, y1, x2: end.x, y2: end.y, ownerSlot: tank.slot, kind: w.id });
+    this.emit('zap');
   }
 
   // ---- spawning enemies ----
@@ -450,8 +513,8 @@ class Game {
     return false;
   }
 
-  damageEnemy(t, b) {
-    t.hp--;
+  damageEnemy(t, b, dmg) {
+    t.hp -= dmg || 1;
     if (t.hp > 0) { this.emit('hitSteel'); return; }
     // destroyed
     t.dead = true;
@@ -557,6 +620,7 @@ class Game {
     this.tick++;
     this.events = [];
     this.mapDelta = [];
+    this.beams = [];
 
     if (this.status === 'lobby' || this.status === 'waiting' || this.status === 'gameover') {
       return; // frozen; still broadcast for overlay/animation
@@ -665,7 +729,7 @@ class Game {
     const players = [...this.players.values()].map(p => ({
       slot: p.slot, name: p.name, color: p.color, lives: p.lives, level: p.level, score: p.score,
     })).sort((a, b) => a.slot - b.slot);
-    return {
+    const out = {
       t: 'state', tick: this.tick, stage: this.stage, status: this.status, friendlyFire: this.friendlyFire,
       frozen: this.tick < this.freezeUntil ? 1 : 0,
       tanks, bullets, powerups, effects, players,
@@ -673,6 +737,9 @@ class Game {
       base: { x: BASE_CX, y: BASE_CY, alive: this.baseAlive },
       events: this.events, mapDelta: this.mapDelta,
     };
+    // chỉ thêm khi có tia (mode 'standard' không bao giờ có ⇒ snapshot giữ nguyên như trước)
+    if (this.beams.length) out.beams = this.beams.slice();
+    return out;
   }
 }
 
@@ -737,6 +804,7 @@ function writeState(room) {
   st.enemiesLeft = s.enemiesLeft;
   st.base = s.base;
   st.friendlyFire = s.friendlyFire;
+  st.mode = game.mode;
 
   // keyed-by-id: xoá một thực thể = một op delete, không dịch cả mảng
   var tanks = {}, i;
@@ -770,6 +838,7 @@ function writeState(room) {
   if (s.events && s.events.length) room.broadcast('fx', s.events);
   if (s.mapDelta && s.mapDelta.length) room.broadcast('mapDelta', s.mapDelta);
   if (s.effects && s.effects.length) room.broadcast('effects', s.effects);
+  if (s.beams && s.beams.length) room.broadcast('beam', s.beams);
 }
 
 module.exports = {
@@ -780,7 +849,7 @@ module.exports = {
       // dims thay cho message 'hello' của server cũ: client cần TILE/COLS/ROWS
       // để dựng canvas. Nằm trong state nên chỉ tốn băng thông đúng một lần.
       dims: { tile: TILE, cols: COLS, rows: ROWS },
-      tick: 0, stage: 1, status: 'lobby', frozen: 0, enemiesLeft: 0, friendlyFire: true,
+      tick: 0, stage: 1, status: 'lobby', frozen: 0, enemiesLeft: 0, friendlyFire: true, mode: 'standard',
       tanks: {}, bullets: {}, players: {}, powerups: [], skins: {}, cos: {}, roomCos: { eagle: null, map: null },
       base: { x: 0, y: 0, alive: true },
       map: game.fullMap(),
@@ -790,7 +859,10 @@ module.exports = {
   // opts của rooms.create(mode, opts): cho phép tạo phòng với { friendlyFire: false }
   onCreate: function (room, opts) {
     if (opts && typeof opts.friendlyFire === 'boolean') game.friendlyFire = opts.friendlyFire;
+    // 'casual' = phòng Thường: súng có tác dụng, KHÔNG nộp BXH. Mọi giá trị khác = Chuẩn.
+    game.mode = opts && opts.mode === 'casual' ? 'casual' : 'standard';
     room.state.friendlyFire = game.friendlyFire;
+    room.state.mode = game.mode;
   },
 
   onJoin: function (room, player) {
@@ -800,6 +872,7 @@ module.exports = {
     // player.cos (mới) hoặc player.skin (host cũ): chỉ nhận SKU đúng dạng của từng slot
     var c = cleanCos(player.cos || (player.skin ? { tank: player.skin } : null));
     if (Object.keys(c).length) cosOf[p.slot] = c; else delete cosOf[p.slot];
+    game.setWeapon(p.slot, c.bullet);
     room.send(player.id, 'you', { slot: p.slot, color: p.color });
     writeState(room);
   },
@@ -810,6 +883,7 @@ module.exports = {
     game.removePlayer(slot);
     delete slotOf[player.id];
     delete cosOf[slot];
+    game.setWeapon(slot, null);
   },
 
   onMessage: function (room, player, type, d) {
@@ -845,6 +919,7 @@ module.exports = {
       if (player.trusted && d) {
         var nc = cleanCos(type === 'cos' ? d.cos : (d.skin ? { tank: d.skin } : null));
         if (Object.keys(nc).length) cosOf[slot] = nc; else delete cosOf[slot];
+        game.setWeapon(slot, nc.bullet);
         writeState(room);
       }
     } else if (type === 'start') {
@@ -866,6 +941,7 @@ module.exports = {
   },
 
   onDispose: function (room) {
+    if (game.mode !== 'standard') return; // phòng Thường không nộp BXH
     // Nộp điểm cuối trận. Đi qua room server nên platform đánh dấu verified.
     var vals = [];
     for (var id in slotOf) {
