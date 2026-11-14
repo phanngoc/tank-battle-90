@@ -8,6 +8,7 @@
    Giao thức WS giống roomd (hello/create/join/rejoin/msg/leave → welcome/snap/ev/err). */
 import { makeRoomModule } from './room-factory.mjs';
 import * as eco from './economy.mjs';
+import * as prog from './progression.mjs';
 
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const TICK_HZ = 30;
@@ -79,6 +80,21 @@ export default {
         if (r.status === 200 && r.body && r.body.granted) await notifyRoomsOfPurchase(env, pid);
         return json(r.body, r.status);
       }
+      if (p === '/v1/progress' || p === '/v1/upgrade' || p.startsWith('/v1/gems/')) {
+        if (!prog.isOn(env)) return json({ error: 'progression_off' }, 404);
+        const pid = await eco.bearer(env, req);
+        if (!pid) return json({ error: 'UNAUTHORIZED' }, 401);
+        let r;
+        if (p === '/v1/progress' && req.method === 'GET') r = await prog.progress(env, pid);
+        else if (p === '/v1/upgrade' && req.method === 'POST') r = await prog.upgrade(env, pid, String(body.stat || ''));
+        else if (p === '/v1/gems/convert' && req.method === 'POST') r = await prog.convertGems(env, pid, body.gems);
+        else if (p === '/v1/gems/sandbox-grant' && req.method === 'POST') r = await prog.sandboxGrant(env, pid, body.gems);
+        else r = { status: 404, body: { error: 'NOT_FOUND' } };
+        // nâng cấp xong khi đang ở phòng: báo phòng cập nhật cấp (áp dụng từ lượt sau)
+        const code = String(body.room || '').toUpperCase();
+        if (p === '/v1/upgrade' && r.status === 200 && /^[A-Z0-9]{4}$/.test(code)) await roomStub(env, code).fetch('https://room/refresh-levels', { method: 'POST', body: JSON.stringify({ playerId: pid }) }).catch(() => {});
+        return json(r.body, r.status);
+      }
       if (p === '/v1/rooms/pick') {
         for (let i = 0; i < 6; i++) {
           const code = genCode();
@@ -126,6 +142,7 @@ export class TankRoom {
     this.sessions = new Map();       // session -> playerId
     this.timer = null; this.emptyTimer = null; this.seq = 0;
     this.festival = false;
+    this.instance = crypto.randomUUID().slice(0, 8);
   }
 
   async fetch(req) {
@@ -136,6 +153,14 @@ export class TankRoom {
       for (const p of this.players.values()) if (p.account === playerId && this.mod) {
         p.cos = await this.cosFor(playerId);
         this.mod.onMessage(this.room, { id: p.id, name: p.name, isHost: p.isHost, trusted: true }, 'cos', { cos: p.cos });
+      }
+      return json({ ok: true });
+    }
+    if (url.pathname === '/refresh-levels') {
+      const { playerId } = await req.json();
+      if (prog.isOn(this.env)) for (const p of this.players.values()) if (p.account === playerId && this.mod) {
+        const levels = await prog.levels(this.env, playerId);
+        this.mod.onMessage(this.room, { id: p.id, name: p.name, isHost: p.isHost, trusted: true }, 'levels', { levels });
       }
       return json({ ok: true });
     }
@@ -176,10 +201,39 @@ export class TankRoom {
       lock() {}, unlock() {}, save() {},
       dispose() { self.dispose(); },
       leaderboard() { return { submit() {} }; },   // chưa có leaderboard trên CF (xem cf/README.md)
+      // Kết quả lượt Chiến dịch (room module gọi đồng bộ trong tick) -> ghi thưởng D1 ngoài tick
+      runResult(ev) { self.onRunResult(ev).catch((err) => console.error('runResult', code, err && err.stack || err)); },
     };
     this.mod = mod; this.room = room; this.code = code; this.seq = 0;
     if (mod.onCreate) mod.onCreate(room, opts || {});
     this.timer = setInterval(() => this.tick(), 1000 / TICK_HZ);
+  }
+
+  /** ev = {runId, mode, stage, win, kills:{slot:n}, slots:{slot:playerId}}. Thưởng theo account (bỏ khách không token). */
+  async onRunResult(ev) {
+    if (!prog.isOn(this.env) || !ev || ev.mode !== 'campaign') return;
+    const runId = this.instance + ':' + ev.runId;            // instance: DO tạo phòng lại cùng mã không trùng runId
+    const players = [];
+    for (const slot in ev.slots) { const p = this.players.get(ev.slots[slot]); if (p && p.account) players.push({ p, slot, kills: ev.kills[slot] | 0 }); }
+    for (const { p, slot, kills } of players) {
+      const r = await prog.awardRun(this.env, { runId, room: this.code, stage: ev.stage, win: ev.win, kills,
+        players: players.map((x) => ({ slot: x.slot, account: x.p.account, kills: x.kills })) }, p.account);
+      if (r && p.ws) this.send(p.ws, { t: 'ev', n: 'reward', d: Object.assign({ stage: ev.stage, win: ev.win, kills }, r) });
+    }
+  }
+
+  /** Lọc mode/campaignN của chủ phòng: PROGRESSION_ON=false -> luôn Chuẩn; màn chỉ ≤ max_cleared+1 của chính họ. */
+  async gateMode(account, o) {
+    const out = Object.assign({}, o);
+    delete out.mode; delete out.campaignN;
+    if (!o || !prog.isOn(this.env)) return out;
+    if (o.mode === 'standard') out.mode = 'standard';
+    if (o.mode === 'campaign' && account) out.mode = 'campaign';
+    if (typeof o.campaignN === 'number' && account) {
+      const n = o.campaignN | 0;
+      if (n >= 1 && n <= await prog.unlockedStage(this.env, account)) out.campaignN = n;
+    }
+    return out;
   }
 
   dispose() {
@@ -227,12 +281,14 @@ export class TankRoom {
           // Phòng Lễ Hội: host mua lượt, tạo phòng với opts.festival -> tiêu 1 lượt trước khi tạo
           if (m.t === 'create' && m.opts && m.opts.festival === true && !this.mod) festival = await eco.consumeFestival(this.env, account);
           if (account) cos = await eco.loadout(this.env, account);
+          if (prog.isOn(this.env) && account) ws.levels = await prog.levels(this.env, account);
+          if (m.t === 'create') ws.opts = await this.gateMode(account, m.opts);
         } catch (err) { console.error('entitlements', err && err.message); }
         finally { ws.joining = false; }
         if (ws.readyState !== undefined && ws.readyState > 1) return;   // đã đóng trong lúc chờ D1
         if (m.t === 'create') {
           if (this.mod) return this.send(ws, { t: 'err', code: 'ROOM_EXISTS' });
-          const opts = Object.assign({}, m.opts); delete opts.festival;
+          const opts = Object.assign({}, ws.opts || m.opts); delete opts.festival;
           this.createRoom(code, opts);
           this.festival = festival;
           this.room.state.festival = festival;
@@ -247,7 +303,7 @@ export class TankRoom {
         ws.playerId = p.id;
         this.welcome(ws, p);
         for (const q of this.players.values()) if (q.ws && q !== p) this.send(q.ws, { t: 'join', p: { id: p.id, name: p.name } });
-        this.mod.onJoin(this.room, { id: p.id, name: p.name, isHost: p.isHost, cos: p.cos });
+        this.mod.onJoin(this.room, { id: p.id, name: p.name, isHost: p.isHost, cos: p.cos, levels: ws.levels || null });
         this.broadcastSnap();
         return;
       }
@@ -268,8 +324,11 @@ export class TankRoom {
         return;
       case 'msg': {
         if (String(m.n) === 'skin' || String(m.n) === 'cos') return;   // cosmetic chỉ do server đặt (từ entitlement + Tủ đồ)
+        if (String(m.n) === 'levels') return;                             // cấp chỉ do server đặt (từ D1)
         const p = ws.playerId && this.players.get(ws.playerId);
-        if (p && this.mod) this.mod.onMessage(this.room, { id: p.id, name: p.name, isHost: p.isHost }, String(m.n), m.d);
+        let d = m.d;
+        if (String(m.n) === 'option' && d && typeof d === 'object') d = await this.gateMode(p && p.account, d);
+        if (p && this.mod && this.players.has(p.id)) this.mod.onMessage(this.room, { id: p.id, name: p.name, isHost: p.isHost }, String(m.n), d);
         return;
       }
       case 'leave': {
