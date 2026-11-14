@@ -964,11 +964,11 @@ function closeShop() {
   document.body.classList.remove('sheet-open');
 }
 // bottom-sheet: thanh kéo + nút ✕ 44px (id shopClose) — gắn lại mỗi lần vẽ thẻ
-function sheetHead(card) {
+function sheetHead(card, title) {
   // thanh trên dính (sticky): mobile = header toàn màn hình, desktop = thanh kéo; ✕ luôn thấy được khi cuộn
   const bar = el('div', { className: 'sheet-bar' });
   bar.appendChild(el('div', { className: 'sheet-handle' }));
-  bar.appendChild(el('div', { className: 'sheet-t' }, '🛒 Cửa hàng'));
+  bar.appendChild(el('div', { className: 'sheet-t' }, title || '🛒 Cửa hàng'));
   const x = el('button', { className: 'sheet-x', id: 'shopClose', type: 'button', title: 'Đóng' }, '✕');
   x.setAttribute('aria-label', 'Đóng'); x.onclick = closeShop; bar.appendChild(x);
   card.appendChild(bar);
@@ -993,7 +993,7 @@ async function openShop(tab, focusSku) {
   document.body.appendChild(shopEl);
   document.body.classList.add('sheet-open');
   sheetHead(card);
-  card.insertAdjacentHTML('beforeend', '<div class="shop-title">🛒 Cửa hàng</div><div class="shop-list">Đang tải…</div>');
+  card.insertAdjacentHTML('beforeend', '<div class="shop-title shop-h">🛒 Cửa hàng</div><div class="shop-list">Đang tải…</div>');
   try { await loadShop(); }
   catch (e) { card.querySelector('.shop-list').textContent = 'Không tải được cửa hàng.'; return; }
   renderShop(card, tab || 'tank', focusSku);
@@ -1003,7 +1003,7 @@ function renderShop(card, tab, focusSku) {
   if (pvRaf) cancelAnimationFrame(pvRaf); pvRaf = 0;
   card.innerHTML = '';
   sheetHead(card);
-  card.appendChild(el('div', { className: 'shop-title' }, '🛒 Cửa hàng'));
+  card.appendChild(el('div', { className: 'shop-title shop-h' }, '🛒 Cửa hàng'));
   const tabs = el('div', { className: 'shop-tabs' });
   for (const [k, label] of TABS) {
     const b = el('button', { className: 'shop-tab' + (k === tab ? ' on' : '') }, label);
@@ -1118,7 +1118,7 @@ async function buy(sku, card) {
     '<button type="button" class="pay-copy" data-copy="' + k + '" aria-label="Sao chép ' + label + '">Sao chép</button></div>';
   const copyVals = { bank: q.bank || '', acc: q.account || '', name: q.accountName || '', amount: String(o.amount), code: o.code };
   card.innerHTML = '';
-  sheetHead(card);
+  sheetHead(card, '💳 Thanh toán');
   card.insertAdjacentHTML('beforeend', (o.sandbox ? '<div class="shop-sandbox">SANDBOX — chưa nhận tiền thật</div>' : '') +
     '<div class="shop-title">Quét mã để thanh toán</div><div class="shop-desc">' + escapeHtml(it.label) + '</div>' +
     '<div class="pay-amount">' + fmtVnd(o.amount) + '</div>' +
