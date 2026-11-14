@@ -14,6 +14,6 @@
   "d1_databases": [{ "binding": "DB", "database_name": "tank-entitlements", "database_id": "d7fa2305-38b1-4567-954f-c9dbdbe0a1ca", "migrations_dir": "migrations" }],
   // Sandbox mặc định. Thanh toán thật (SePay): đặt "true" + `wrangler secret put SEPAY_API_KEY` và AUTH_SECRET,
   // PAYMENT_BANK = tên ngân hàng ngắn của SePay (vd MBBank), PAYMENT_ACCOUNT = số TK thật.
-  "vars": { "PAYMENTS_LIVE": "false", "PAYMENT_BANK": "MBBank", "PAYMENT_ACCOUNT": "SANDBOX", "PAYMENT_ACCOUNT_NAME": "ARCADE" },
+  "vars": { "PROGRESSION_ON": "false", "PAYMENTS_LIVE": "false", "PAYMENT_BANK": "MBBank", "PAYMENT_ACCOUNT": "SANDBOX", "PAYMENT_ACCOUNT_NAME": "ARCADE" },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TankRoom"] }]
 }

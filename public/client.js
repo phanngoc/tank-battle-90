@@ -50,7 +50,8 @@ const waitCount = document.getElementById('waitCount');
 const copyBtn = document.getElementById('copyBtn');
 const beginBtn = document.getElementById('beginBtn');
 const ffBtn = document.getElementById('ffBtn');
-let friendlyFire = true;  // tuỳ chọn phòng, server là nguồn sự thật
+let friendlyFire = true;
+let roomMode = 'standard', roomStage = 1;   // mode Chiến dịch (chỉ khi /v1/progress = 200)  // tuỳ chọn phòng, server là nguồn sự thật
 const restartBtn2 = document.getElementById('restartBtn2');
 const roomChip = document.getElementById('roomChip');
 const hudStage = document.getElementById('hudStage');
@@ -129,6 +130,7 @@ function wireRoom(r) {
   r.onEvent('you', function (d) { me = d.slot; });
   r.onEvent('fx', function (list) { for (var i = 0; i < list.length; i++) playSfx(list[i]); });
   r.onEvent('mapDelta', function (list) { for (var i = 0; i < list.length; i++) applyDelta(list[i].x, list[i].y, list[i].t); });
+  r.onEvent('reward', function (d) { lastReward = d; if (d && !d.duplicate) toast('+' + d.gold + ' gold' + (d.bonus ? ' (thắng đầu ngày +' + d.bonus + ')' : '') + (d.capped ? ' · chạm trần ngày' : '')); loadProgress(); });
   r.onEvent('effects', function (list) { pendingEffects = list || []; });
   r.onError(function (e) {
     showErr(e.code === 'ROOM_FULL' ? 'Phòng đã đủ 4 người.'
@@ -150,6 +152,8 @@ function wireRoom(r) {
 
     statusText = s.status;
     if (typeof s.friendlyFire === 'boolean') friendlyFire = s.friendlyFire;
+    if (s.mode) roomMode = s.mode;
+    if (s.campaignN) roomStage = s.campaignN;
     var legacy = toLegacy(s);
     latest = legacy;
     pendingEffects = [];
@@ -201,6 +205,7 @@ function updateLobbyStat(m) {
 }
 
 function onJoined(room) {
+  loadProgress();
   history.replaceState(null, '', inviteLink(room));
   roomChip.textContent = `Phòng ${room} · 📋`;
   roomChip.classList.remove('hidden');
@@ -621,7 +626,7 @@ function updateHud(m) {
 function updateOverlay() {
   if (!joined) { showOverlay('menu'); return; }
   if (statusText === 'waiting') { showOverlay('waiting'); return; }
-  if (statusText === 'gameover') { showOverlay('gameover'); return; }
+  if (statusText === 'gameover' || statusText === 'campaignclear') { showOverlay('gameover'); return; }
   overlayMode = null;
   overlay.classList.add('hidden');
 }
@@ -642,10 +647,18 @@ function showOverlay(mode) {
     ffBtn.textContent = '🎯 Bắn đồng đội: ' + (friendlyFire ? 'BẬT (choáng 2s)' : 'TẮT');
     ffBtn.classList.toggle('off', !friendlyFire);
     ffBtn.disabled = !host;
+    renderModeRow(host);
   }
   if (mode === 'gameover') {
     const mine = latest && latest.players.find(p => p.slot === me);
     overSub.textContent = mine ? `Điểm của bạn: ${mine.score}` : 'Căn cứ đã thất thủ';
+    const ttl = ovOver.querySelector('.ov-title');
+    if (roomMode === 'campaign') {
+      const win = statusText === 'campaignclear';
+      ttl.textContent = win ? 'QUA MÀN ' + roomStage + '!' : 'THUA MÀN ' + roomStage;
+      if (lastReward && !lastReward.duplicate) overSub.textContent += ' · +' + lastReward.gold + ' gold';
+      restartBtn2.textContent = win && prog && roomStage < prog.unlocked ? 'CHƠI LẠI MÀN ' + roomStage : 'CHƠI LẠI';
+    } else { ttl.textContent = 'GAME OVER'; restartBtn2.textContent = 'CHƠI LẠI'; }
   }
 }
 
@@ -954,6 +967,7 @@ function el(tag, attrs, html) { const e = document.createElement(tag); Object.as
 
 let shopEl = null, pollTimer = null, pvRaf = 0;
 let shopItems = [], myLook = { tank: null, bullet: null, eagle: null, map: null };
+const TABS_UP = ['up', '⬆️ Nâng cấp'];
 const TABS = [['tank', '🛡️ Xe'], ['bullet', '💥 Đạn'], ['eagle', '🦅 Đại bàng'], ['map', '🗺️ Map'], ['bundle', '🎁 Combo'], ['inv', '🎒 Tủ đồ']];
 const RARITY = { common: 'Thường', rare: 'Hiếm', epic: 'Sử thi', legendary: 'Huyền thoại', pass: 'Pass', room: 'Phòng', bundle: 'Combo' };
 const ICON = { tank: '🛡️', bullet: '💥', eagle: '🦅', map: '🗺️' };
@@ -975,6 +989,7 @@ function sheetHead(card) {
 }
 window.addEventListener('keydown', (e) => { if (shopEl && e.key === 'Escape') { e.stopPropagation(); closeShop(); } }, true);
 async function loadShop() {
+  await loadProgress();
   shopItems = await api('GET', '/v1/shop');
   await refreshOwned();
   try { myLook = await api('GET', '/v1/loadout'); } catch (e) { /* giữ mặc định */ }
@@ -1005,12 +1020,13 @@ function renderShop(card, tab, focusSku) {
   sheetHead(card);
   card.appendChild(el('div', { className: 'shop-title' }, '🛒 Cửa hàng'));
   const tabs = el('div', { className: 'shop-tabs' });
-  for (const [k, label] of TABS) {
+  for (const [k, label] of (prog ? [TABS_UP].concat(TABS) : TABS)) {
     const b = el('button', { className: 'shop-tab' + (k === tab ? ' on' : '') }, label);
     b.dataset.tab = k; b.onclick = () => renderShop(card, k);
     tabs.appendChild(b);
   }
   card.appendChild(tabs);
+  if (tab === 'up') { renderUpgrade(card); return; }
   // xem trước: món đang chọn + các slot khác theo đồ đang mặc
   const pv = el('canvas', { className: 'shop-pv', id: 'shopPreview', width: 160, height: 112 });
   card.appendChild(pv);
@@ -1172,3 +1188,74 @@ async function buy(sku, card) {
   btn2.onclick = () => openShop();
   beginBtn.parentNode.insertBefore(btn2, ffBtn.nextSibling);
 })();
+
+// ═══ Progression (mode Chiến dịch) — chỉ hiện khi server bật PROGRESSION_ON (/v1/progress = 200) ═══
+let prog = null, lastReward = null;
+const STAT_LABEL = { move: '🏎️ Tốc độ xe', rof: '🔫 Tốc độ bắn', bspeed: '💨 Tốc độ đạn', power: '💥 Sát thương', armor: '🛡️ Giáp' };
+async function loadProgress() {
+  try { prog = await api('GET', '/v1/progress'); if (!prog || !prog.levels) prog = null; } catch (e) { prog = null; }
+  if (overlayMode === 'waiting') showOverlay('waiting');
+  return prog;
+}
+function renderUpgrade(card) {
+  const box = el('div', { className: 'up-box' });
+  card.appendChild(box);
+  if (!prog) { box.textContent = 'Chưa mở.'; return; }
+  const P = prog;
+  box.appendChild(el('div', { className: 'up-wallet' },
+    '<span>🪙 <b id="upGold">' + P.wallet.gold.toLocaleString('vi-VN') + '</b></span><span>💎 <b id="upGems">' + P.wallet.gems + '</b></span>' +
+    '<span class="up-day">Hôm nay ' + P.today.gold + '/' + P.today.cap + '</span>'));
+  for (const k of P.stats) {
+    const lv = P.levels[k], max = lv >= P.maxLevel, cost = max ? 0 : P.upgradeCost[lv + 1];
+    const row = el('div', { className: 'up-row' },
+      '<span class="up-n">' + STAT_LABEL[k] + '</span><span class="up-lv">Cấp <b>' + lv + '</b>/' + P.maxLevel + '</span>');
+    const b = el('button', { className: 'ov-btn up-btn' }, max ? 'Tối đa' : '⬆ ' + cost.toLocaleString('vi-VN') + ' 🪙');
+    b.dataset.stat = k; b.disabled = max || P.wallet.gold < cost;
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const r = await arcade.req('POST', '/v1/upgrade', { stat: k, room: myRoom || '' });
+        if (r && r.body && r.body.levels) { prog = r.body; toast(STAT_LABEL[k] + ' → cấp ' + prog.levels[k]); }
+      } catch (e) { toast(e && e.code === 'NOT_ENOUGH_GOLD' ? 'Chưa đủ gold' : 'Không nâng được'); await loadProgress(); }
+      card.innerHTML = ''; renderShop(card, 'up');
+    };
+    row.appendChild(b); box.appendChild(row);
+  }
+  const conv = el('div', { className: 'up-row up-conv' }, '<span class="up-n">💎 → 🪙 (1💎 = ' + P.rewards.gemToGold + ')</span><span class="up-lv">Tuần: ' +
+    P.week.converted.toLocaleString('vi-VN') + '/' + P.week.cap.toLocaleString('vi-VN') + '</span>');
+  const cb = el('button', { className: 'ov-btn ghost up-btn', id: 'upConvert' }, 'Đổi 10💎');
+  cb.disabled = P.wallet.gems < 10 || P.week.converted + 10 * P.rewards.gemToGold > P.week.cap;
+  cb.onclick = async () => { try { const r = await arcade.req('POST', '/v1/gems/convert', { gems: 10 }); if (r && r.body && r.body.wallet) prog = r.body; } catch (e) { toast('Không đổi được'); } card.innerHTML = ''; renderShop(card, 'up'); };
+  conv.appendChild(cb); box.appendChild(conv);
+  if (P.sandbox) {
+    const sb = el('button', { className: 'ov-btn ghost up-btn', id: 'upSandbox' }, '🧪 Sandbox +100💎');
+    sb.onclick = async () => { try { const r = await arcade.req('POST', '/v1/gems/sandbox-grant', { gems: 100 }); if (r && r.body && r.body.wallet) prog = r.body; } catch (e) { /* */ } card.innerHTML = ''; renderShop(card, 'up'); };
+    box.appendChild(sb);
+  }
+  box.appendChild(el('div', { className: 'shop-note' }, 'Cấp chỉ có tác dụng ở mode Chiến dịch. Mode Chuẩn giữ nguyên game gốc và bảng xếp hạng.'));
+}
+let modeRow = null;
+function renderModeRow(host) {
+  if (!modeRow) {
+    modeRow = el('div', { className: 'mode-row', id: 'modeRow' });
+    ffBtn.parentNode.insertBefore(modeRow, ffBtn.nextSibling);
+  }
+  if (!prog) { modeRow.style.display = 'none'; return; }
+  modeRow.style.display = '';
+  const camp = roomMode === 'campaign';
+  let html = '<div class="mode-seg"><button type="button" data-m="standard" class="' + (camp ? '' : 'on') + '">Chuẩn</button>' +
+    '<button type="button" data-m="campaign" class="' + (camp ? 'on' : '') + '">Chiến dịch</button></div>';
+  if (camp) {
+    html += '<select id="stageSel" class="mode-stage">';
+    for (const st of prog.stages) if (st.n <= prog.unlocked) html += '<option value="' + st.n + '"' + (st.n === roomStage ? ' selected' : '') + '>Màn ' + st.n + (st.cleared ? ' ✓' : '') + ' · KN' + st.rec + '</option>';
+    html += '</select>';
+  }
+  if (modeRow.dataset.k === html + host) return;          // tránh vẽ lại mỗi snapshot (select đang mở)
+  modeRow.dataset.k = html + host;
+  modeRow.innerHTML = html;
+  modeRow.querySelectorAll('button,select').forEach((b) => { b.disabled = !host; });
+  modeRow.querySelectorAll('button').forEach((b) => { b.onclick = () => send({ t: 'option', d: { mode: b.dataset.m, campaignN: roomStage <= prog.unlocked ? roomStage : prog.unlocked } }); });
+  const sel = modeRow.querySelector('select');
+  if (sel) sel.onchange = () => send({ t: 'option', d: { campaignN: +sel.value } });
+}
+loadProgress();

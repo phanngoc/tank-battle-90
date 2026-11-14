@@ -45,6 +45,75 @@ const ENEMY_TEMPLATE = {
   armor: { speed: 1, hp: 4, bulletSpeed: 4, score: 400, fireProb: 0.030, tclass: 3 },
 };
 
+// ═══ Chiến dịch (progression v2, sau cờ PROGRESSION_ON ở Worker) ═══════════════
+// Mode Chuẩn KHÔNG đọc gì ở đây: mọi nhánh campaign chỉ chạy khi game.mode === 'campaign'.
+// Chỉ số người chơi: 5 chỉ số, cấp 1..10. Cấp 1 = hằng số hiện tại.
+const UPGRADE_STATS = ['move', 'rof', 'bspeed', 'power', 'armor'];
+const UPGRADE_MAX = 10;
+// gold để LÊN cấp i (i = 2..10); tổng 15.300 / chỉ số, 76.500 cả 5
+const UPGRADE_COST = [0, 0, 100, 200, 400, 700, 1100, 1700, 2500, 3600, 5000];
+const ROF_COOLDOWN = [0, 8, 8, 7, 7, 7, 6, 6, 6, 5, 5];
+function clampLvl(v) { v = v | 0; return v < 1 ? 1 : v > UPGRADE_MAX ? UPGRADE_MAX : v; }
+function cleanLevels(lv) {
+  const o = {};
+  for (const k of UPGRADE_STATS) o[k] = clampLvl(lv && lv[k]);
+  return o;
+}
+function statsFor(levels, mode) {
+  if (mode !== 'campaign' || !levels) return { speed: 2, fireCooldown: 8, bulletSpeed: 6, dmg: 1, plateTicks: 0 };
+  const L = cleanLevels(levels);
+  return {
+    speed: 2 * (1 + 0.033 * (L.move - 1)),                       // 2 → 2,6 px/tick (+30%)
+    fireCooldown: ROF_COOLDOWN[L.rof],                            // 8 → 5 tick
+    maxBullets: L.rof >= 9 ? 3 : L.rof >= 5 ? 2 : 1,              // đạn cùng lúc trên sân (giới hạn thật của tốc bắn)
+    bulletSpeed: 6 + 2 * (L.bspeed - 1) / 9,                      // 6 → 8 px/tick
+    dmg: Math.round(10 * (1 + 0.111 * (L.power - 1))),            // máu ×10: 10 → 20 (armor chết nửa số phát)
+    plateTicks: L.armor >= 2 ? Math.round(TICK_HZ * 60 * Math.pow(0.9, L.armor - 2)) : 0, // lớp giáp đỡ 1 phát
+  };
+}
+function upgradeCostTotal(from, to) { let g = 0; for (let i = from + 1; i <= to; i++) g += UPGRADE_COST[i]; return g; }
+
+// Bảng màn: độ khó CỐ ĐỊNH theo số màn (không theo cấp đội). rec = cấp khuyến nghị (mọi chỉ số).
+// fire = hệ số fireProb địch · armorHp = máu armor (đơn vị đạn cấp 1) · armorPct = % armor trong hàng đợi
+// speed = +tốc mọi địch · extra = +địch tối đa trên sân (trần 9) · fastBullet = tốc đạn địch fast/basic
+const CAMPAIGN_STAGES = 24;
+// Chiến dịch xoay map 1 ↔ map 2. Map 3 khó hơn hẳn (bot sim: cấp 10 không qua 50% ở nửa sau) nên
+// chưa dùng trong Chiến dịch; mode Chuẩn vẫn đủ 3 map. Map 2 dễ hơn map 1 ⇒ cộng bù độ khó.
+const CAMPAIGN_MAPS = [0, 1];
+const CAMPAIGN_MAP_OFFSET = [0.05, 0.6, 0];
+function campaignStage(n) {
+  n = Math.max(1, Math.min(CAMPAIGN_STAGES, n | 0));
+  const t = (n - 1) / (CAMPAIGN_STAGES - 1);                      // 0..1
+  const map = CAMPAIGN_MAPS[(n - 1) % CAMPAIGN_MAPS.length];
+  const d = Math.min(2, 1.25 * t + CAMPAIGN_MAP_OFFSET[map] * Math.min(1, t * 4)); // độ khó hiệu dụng
+  return {
+    n, map, d: +d.toFixed(3),
+    rec: CAMPAIGN_REC[n - 1],
+    fire: +(1 + 0.3 * d).toFixed(2),
+    armorHp: 4 + Math.floor(5 * d),
+    hp: 1 + Math.floor(2.5 * d),                                  // máu địch thường (basic/fast/power)
+    armorPct: Math.round(10 + 40 * Math.min(1, d)),
+    speed: 0,
+    extra: 0,
+    enemyBullet: n >= 10 ? 5 : 4,
+  };
+}
+// Cấp khuyến nghị (đều 5 chỉ số) theo màn — lấy từ test/campaign-sweep.js (cấp thấp nhất đội 2 người thắng ≥ 50%)
+const CAMPAIGN_REC = [1, 1, 2, 2, 2, 2, 2, 4, 6, 6, 6, 6, 7, 7, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10];
+function buildCampaignQueue(cs, count) {
+  const q = [];
+  for (let i = 0; i < count; i++) {
+    const r = (i * 37 + cs.n * 11) % 100;
+    let t;
+    if (r < cs.armorPct) t = 'armor';
+    else if (r < cs.armorPct + 20) t = 'fast';
+    else if (r < cs.armorPct + 40) t = 'power';
+    else t = 'basic';
+    q.push(t);
+  }
+  return q;
+}
+
 const POWERUP_TYPES = ['star', 'grenade', 'clock', 'shovel', 'tank', 'helmet'];
 
 // --- Stage maps authored at 13x13 "big tile" resolution, each cell -> 2x2 small tiles.
@@ -170,6 +239,8 @@ class Game {
     this.stageClearAt = 0;
     this.maxActive = maxActiveEnemies(1);
     this.friendlyFire = true;  // room option, toggled from the waiting room
+    this.mode = 'standard';    // 'standard' (= game gốc, BXH) | 'campaign' (cấp thật, 1 màn đánh số)
+    this.campaignN = 1;
   }
 
   nextId() { return this.idCounter++; }
@@ -217,7 +288,7 @@ class Game {
   }
 
   startGame() {
-    this.stage = 1;
+    this.stage = this.mode === 'campaign' ? this.campaignN : 1;
     for (const p of this.players.values()) { p.lives = START_LIVES; p.level = 0; p.score = 0; }
     this.loadStage(this.stage);
   }
@@ -227,7 +298,9 @@ class Game {
   }
 
   loadStage(stage) {
-    this.grid = buildGrid((stage - 1) % MAPS.length);
+    const cs = this.mode === 'campaign' ? campaignStage(stage) : null;
+    this.cs = cs;
+    this.grid = buildGrid(cs ? cs.map : (stage - 1) % MAPS.length);
     this.mapDelta = [];
     this.tanks = [];
     this.bullets = [];
@@ -235,8 +308,8 @@ class Game {
     this.effects = [];
     // squad size is locked in at stage start; late joiners raise it next stage
     const n = this.players.size;
-    this.enemyQueue = buildQueue(stage, stageEnemyCount(n));
-    this.maxActive = maxActiveEnemies(n);
+    this.enemyQueue = cs ? buildCampaignQueue(cs, stageEnemyCount(n)) : buildQueue(stage, stageEnemyCount(n));
+    this.maxActive = cs ? Math.min(MAX_ACTIVE_CAP + 1, maxActiveEnemies(n) + cs.extra) : maxActiveEnemies(n);
     this.spawnedCount = 0;
     this.spawnCooldown = TICK_HZ; // 1s before first enemy
     this.spawnPointIdx = 0;
@@ -263,6 +336,17 @@ class Game {
 
   makePlayerTank(p, x, y) {
     const lvl = p.level;
+    if (this.mode === 'campaign') {
+      const st = statsFor(p.levels, 'campaign');
+      return {
+        id: this.nextId(), kind: 'player', slot: p.slot, color: p.color,
+        x, y, w: TANK, h: TANK, dir: UP, moving: false, speed: st.speed, moveAcc: 0,
+        baseBulletSpeed: st.bulletSpeed, bulletSpeed: lvl >= 1 ? Math.max(8, st.bulletSpeed) : st.bulletSpeed,
+        rofBullets: st.maxBullets, maxBullets: Math.max(lvl >= 2 ? 2 : 1, st.maxBullets), canDestroySteel: lvl >= 3, fireCooldown: st.fireCooldown, cooldown: 0,
+        dmg: st.dmg, plateTicks: st.plateTicks, plateReadyAt: 0,
+        hp: 1, spawnUntil: 0, shieldUntil: 0, stunUntil: 0, dead: false, blocked: false,
+      };
+    }
     return {
       id: this.nextId(), kind: 'player', slot: p.slot, color: p.color,
       x, y, w: TANK, h: TANK, dir: UP, moving: false, speed: 2,
@@ -275,8 +359,8 @@ class Game {
   refreshPlayerTankStats(p) {
     const t = p.tankId != null ? this.tanks.find(k => k.id === p.tankId) : null;
     if (!t) return;
-    t.bulletSpeed = p.level >= 1 ? 8 : 6;
-    t.maxBullets = p.level >= 2 ? 2 : 1;
+    t.bulletSpeed = t.baseBulletSpeed ? (p.level >= 1 ? Math.max(8, t.baseBulletSpeed) : t.baseBulletSpeed) : (p.level >= 1 ? 8 : 6);
+    t.maxBullets = Math.max(p.level >= 2 ? 2 : 1, t.rofBullets || 1);
     t.canDestroySteel = p.level >= 3;
   }
 
@@ -318,7 +402,9 @@ class Game {
     if (!tank.moving) return 0;
     const [dx, dy] = DIR[tank.dir];
     let moved = 0;
-    for (let s = 0; s < tank.speed; s++) {
+    let steps = tank.speed;
+    if (tank.moveAcc !== undefined) { tank.moveAcc += tank.speed; steps = Math.floor(tank.moveAcc); tank.moveAcc -= steps; }
+    for (let s = 0; s < steps; s++) {
       const nx = tank.x + dx, ny = tank.y + dy;
       if (this.rectHitsSolidTiles(nx, ny, tank.w, tank.h)) break;
       if (this.hitsOtherTank(tank, nx, ny)) break;
@@ -343,6 +429,7 @@ class Game {
       dir: tank.dir, speed: tank.bulletSpeed, ownerId: tank.id, ownerKind: tank.kind,
       power: !!tank.canDestroySteel, dead: false,
     });
+    if (tank.dmg) { const nb = this.bullets[this.bullets.length - 1]; nb.dmg = tank.dmg; nb.acc = 0; }
     this.emit('shoot');
   }
 
@@ -361,12 +448,16 @@ class Game {
     const type = this.enemyQueue.shift();
     const tpl = ENEMY_TEMPLATE[type];
     const isBonus = isBonusIndex(this.spawnedCount);
-    const speed = tpl.speed + (this.stage >= 4 ? 1 : 0);
+    const cs = this.cs;
+    const speed = cs ? tpl.speed + cs.speed : tpl.speed + (this.stage >= 4 ? 1 : 0);
+    // campaign: máu ×10 (đạn người chơi gây 10..14); armor theo bảng màn
+    const hp = cs ? (type === 'armor' ? cs.armorHp : cs.hp) * 10 : tpl.hp;
     this.tanks.push({
       id: this.nextId(), kind: 'enemy', enemyType: type, tclass: tpl.tclass,
       x: sp.x, y: sp.y, w: TANK, h: TANK, dir: DOWN, moving: true, speed,
-      bulletSpeed: tpl.bulletSpeed, fireProb: tpl.fireProb, fireCooldown: 20, cooldown: 0,
-      hp: tpl.hp, maxHp: tpl.hp, score: tpl.score, bonus: isBonus,
+      bulletSpeed: cs ? Math.max(tpl.bulletSpeed, cs.enemyBullet) : tpl.bulletSpeed,
+      fireProb: cs ? tpl.fireProb * cs.fire : tpl.fireProb, fireCooldown: 20, cooldown: 0,
+      hp, maxHp: hp, hpUnit: cs ? 10 : 0, score: tpl.score, bonus: isBonus,
       spawnUntil: this.tick + Math.round(TICK_HZ * 1.0), shieldUntil: 0,
       dead: false, blocked: false, aiTimer: 0,
     });
@@ -411,7 +502,9 @@ class Game {
   }
 
   updateBullet(b) {
-    for (let s = 0; s < b.speed && !b.dead; s++) {
+    let steps = b.speed;
+    if (b.acc !== undefined) { b.acc += b.speed; steps = Math.floor(b.acc); b.acc -= steps; }
+    for (let s = 0; s < steps && !b.dead; s++) {
       b.x += DIR[b.dir][0]; b.y += DIR[b.dir][1];
       // out of bounds
       if (b.x < 0 || b.y < 0 || b.x + b.w > FIELD_W || b.y + b.h > FIELD_H) { b.dead = true; this.emit('hitSteel'); break; }
@@ -446,7 +539,7 @@ class Game {
   }
 
   damageEnemy(t, b) {
-    t.hp--;
+    if (t.hpUnit) t.hp -= (b.dmg || 10); else t.hp--;
     if (t.hp > 0) { this.emit('hitSteel'); return; }
     // destroyed
     t.dead = true;
@@ -467,6 +560,12 @@ class Game {
 
   damagePlayer(t) {
     if (t.shieldUntil > this.tick) return;
+    if (t.plateTicks && this.tick >= t.plateReadyAt) {   // campaign: lớp giáp đỡ 1 phát rồi nạp lại
+      t.plateReadyAt = this.tick + t.plateTicks;
+      t.shieldUntil = this.tick + Math.round(TICK_HZ * 0.5);
+      this.emit('plate');
+      return;
+    }
     t.dead = true;
     this.effects.push({ id: this.nextId(), kind: 'boom', x: t.x + t.w / 2, y: t.y + t.h / 2, life: 14, born: this.tick });
     this.emit('explodeTank');
@@ -553,7 +652,7 @@ class Game {
     this.events = [];
     this.mapDelta = [];
 
-    if (this.status === 'lobby' || this.status === 'waiting' || this.status === 'gameover') {
+    if (this.status === 'lobby' || this.status === 'waiting' || this.status === 'gameover' || this.status === 'campaignclear') {
       return; // frozen; still broadcast for overlay/animation
     }
 
@@ -623,6 +722,7 @@ class Game {
 
     // win / lose
     if (this.baseAlive && this.enemyQueue.length === 0 && this.activeEnemies() === 0) {
+      if (this.mode === 'campaign') { this.status = 'campaignclear'; this.emit('campaignClear'); return; } // 1 màn / lượt
       this.status = 'stageclear';
       this.stageClearAt = this.tick + Math.round(TICK_HZ * 3);
       return;
@@ -648,7 +748,7 @@ class Game {
       sh: t.shieldUntil > this.tick ? 1 : 0,
       st: t.stunUntil > this.tick ? 1 : 0,
       et: t.enemyType || '', tc: t.tclass ?? -1, bo: t.bonus ? 1 : 0,
-      hp: t.hp, mh: t.maxHp || 1,
+      hp: t.hpUnit ? Math.ceil(t.hp / t.hpUnit) : t.hp, mh: t.hpUnit ? Math.ceil(t.maxHp / t.hpUnit) : (t.maxHp || 1),
     }));
     // s = slot người bắn (chỉ để client vẽ kiểu đạn cosmetic; engine không đọc lại)
     const slotOfTank = {};
@@ -673,7 +773,9 @@ class Game {
 
 // Dual environment: Node (server) via module.exports, browser (Pages demo) via window.
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { Game, TILE, COLS, ROWS, FIELD_W, FIELD_H, TICK_HZ };
+  module.exports = { Game, TILE, COLS, ROWS, FIELD_W, FIELD_H, TICK_HZ,
+    UPGRADE_STATS, UPGRADE_MAX, UPGRADE_COST, ROF_COOLDOWN, statsFor, cleanLevels, upgradeCostTotal,
+    CAMPAIGN_STAGES, campaignStage, buildCampaignQueue };
 }
 if (typeof window !== 'undefined') {
   window.TankEngine = { Game, TILE, COLS, ROWS, FIELD_W, FIELD_H, TICK_HZ };
