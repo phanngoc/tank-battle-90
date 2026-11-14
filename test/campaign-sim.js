@@ -18,6 +18,8 @@ function botControl(g, p, mem) {
   // kẹt: vị trí không đổi khi đang chạy
   if (mem.lx === t.x && mem.ly === t.y && p.ctrl.moving) mem.stuck++; else mem.stuck = 0;
   mem.lx = t.x; mem.ly = t.y;
+  if (mem.wander > 0) { mem.wander--; p.ctrl.moving = true; return; }
+  if (mem.stuck > 6) { mem.wander = 12 + (Math.random() * 20 | 0); p.ctrl.dir = (Math.random() * 4) | 0; p.ctrl.moving = true; return; }
   // né / bắn chặn đạn địch đang lao tới trong làn của mình
   for (const b of g.bullets) {
     if (b.dead || b.ownerKind !== 'enemy') continue;
@@ -30,24 +32,28 @@ function botControl(g, p, mem) {
     if (t.cooldown === 0 && safeFire(t, face)) { p.ctrl.dir = face; p.ctrl.moving = false; p.ctrl.fire = true; return; }
     p.ctrl.dir = vert ? (bx > cx ? 3 : 1) : (by > cy ? 0 : 2); p.ctrl.moving = true; return;
   }
-  if (mem.wander > 0) { mem.wander--; p.ctrl.moving = true; return; }
-  if (mem.stuck > 6) { mem.wander = 12 + (Math.random() * 20 | 0); p.ctrl.dir = (Math.random() * 4) | 0; p.ctrl.moving = true; return; }
-  if (!en.length) { // về giữ nhà
-    const dx = BX - cx, dy = (BY - 48) - cy;
-    if (Math.abs(dx) + Math.abs(dy) < 24) { p.ctrl.moving = false; p.ctrl.dir = 0; return; }
-    p.ctrl.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0); p.ctrl.moving = true; return;
-  }
-  // mục tiêu: địch gần đại bàng nhất (có trọng số khoảng cách tới mình)
+  const near = en.filter(e => Math.hypot(e.x + 16 - BX, e.y + 16 - BY) < 170);
+  const defender = p.slot === 0;
+  let pool = near.length ? near : (defender ? en.filter(e => alignedShot(t, e)) : en);
+  if (!pool.length) return goPost(p, t, mem);
   let best = null, bs = 1e9;
-  for (const e of en) {
-    const s = Math.hypot(e.x + 16 - BX, e.y + 16 - BY) + 0.5 * Math.hypot(e.x + 16 - cx, e.y + 16 - cy);
+  for (const e of pool) {
+    const s = Math.hypot(e.x + 16 - BX, e.y + 16 - BY) + 0.7 * Math.hypot(e.x + 16 - cx, e.y + 16 - cy);
     if (s < bs) { bs = s; best = e; }
   }
   const dx = best.x + 16 - cx, dy = best.y + 16 - cy;
-  if (Math.abs(dx) < 10) { p.ctrl.dir = dy > 0 ? 2 : 0; p.ctrl.moving = Math.abs(dy) > 80; return; }
-  if (Math.abs(dy) < 10) { p.ctrl.dir = dx > 0 ? 1 : 3; p.ctrl.moving = Math.abs(dx) > 80; return; }
-  // căn hàng theo trục lệch ít hơn
+  if (Math.abs(dx) < 10) { p.ctrl.dir = dy > 0 ? 2 : 0; p.ctrl.moving = Math.abs(dy) > 64 && !defender; return; }
+  if (Math.abs(dy) < 10) { p.ctrl.dir = dx > 0 ? 1 : 3; p.ctrl.moving = Math.abs(dx) > 64 && !defender; return; }
   if (Math.abs(dx) < Math.abs(dy)) p.ctrl.dir = dx > 0 ? 1 : 3; else p.ctrl.dir = dy > 0 ? 2 : 0;
+  p.ctrl.moving = true;
+}
+function alignedShot(t, e) { return Math.abs(e.x - t.x) < 10 || Math.abs(e.y - t.y) < 10; }
+// trạm gác: người giữ nhà đứng trên nóc đại bàng nhìn lên; người khác ra giữa sân
+function goPost(p, t, mem) {
+  const post = p.slot === 0 ? { x: 192, y: 320, face: 0 } : [null, { x: 96, y: 224, face: 0 }, { x: 288, y: 224, face: 0 }, { x: 192, y: 160, face: 0 }][p.slot];
+  const dx = post.x - t.x, dy = post.y - t.y;
+  if (Math.abs(dx) < 4 && Math.abs(dy) < 4) { p.ctrl.dir = post.face; p.ctrl.moving = false; return; }
+  p.ctrl.dir = Math.abs(dy) >= 4 && (Math.abs(dy) > Math.abs(dx) || mem.axis) ? (dy > 0 ? 2 : 0) : (dx > 0 ? 1 : 3);
   p.ctrl.moving = true;
 }
 
