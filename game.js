@@ -82,12 +82,12 @@ function campaignStage(n) {
   return {
     n, map: (n - 1) % MAPS.length,
     rec: Math.min(UPGRADE_MAX, 1 + Math.floor((n - 1) * 9 / (CAMPAIGN_STAGES - 4))) ,
-    fire: +(1 + 1.6 * t).toFixed(2),
-    armorHp: 4 + Math.floor(3 * t),
-    armorPct: Math.round(10 + 30 * t),
-    speed: n >= 12 ? 1 : 0,
-    extra: n >= 16 ? 1 : 0,
-    enemyBullet: n >= 8 ? 5 : 4,
+    fire: +(1 + 1.0 * t).toFixed(2),
+    armorHp: 4 + Math.floor(2.99 * t),
+    armorPct: Math.round(10 + 25 * t),
+    speed: 0,
+    extra: n >= 18 ? 1 : 0,
+    enemyBullet: n >= 10 ? 5 : 4,
   };
 }
 function buildCampaignQueue(cs, count) {
