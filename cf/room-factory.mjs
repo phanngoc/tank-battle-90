@@ -50,6 +50,67 @@ const ENEMY_TEMPLATE = {
   armor: { speed: 1, hp: 4, bulletSpeed: 4, score: 400, fireProb: 0.030, tclass: 3 },
 };
 
+// ═══ Chiến dịch (progression v2, sau cờ PROGRESSION_ON ở Worker) ═══════════════
+// Mode Chuẩn KHÔNG đọc gì ở đây: mọi nhánh campaign chỉ chạy khi game.mode === 'campaign'.
+// Chỉ số người chơi: 5 chỉ số, cấp 1..10. Cấp 1 = hằng số hiện tại.
+const UPGRADE_STATS = ['move', 'rof', 'bspeed', 'power', 'armor'];
+const UPGRADE_MAX = 10;
+// gold để LÊN cấp i (i = 2..10); tổng 15.300 / chỉ số, 76.500 cả 5
+const UPGRADE_COST = [0, 0, 100, 200, 400, 700, 1100, 1700, 2500, 3600, 5000];
+const ROF_COOLDOWN = [0, 8, 8, 7, 7, 7, 6, 6, 6, 5, 5];
+function clampLvl(v) { v = v | 0; return v < 1 ? 1 : v > UPGRADE_MAX ? UPGRADE_MAX : v; }
+function cleanLevels(lv) {
+  const o = {};
+  for (const k of UPGRADE_STATS) o[k] = clampLvl(lv && lv[k]);
+  return o;
+}
+function statsFor(levels, mode) {
+  if (mode !== 'campaign' || !levels) return { speed: 2, fireCooldown: 8, bulletSpeed: 6, dmg: 1, plateTicks: 0 };
+  const L = cleanLevels(levels);
+  return {
+    speed: 2 * (1 + 0.033 * (L.move - 1)),                       // 2 → 2,6 px/tick (+30%)
+    fireCooldown: ROF_COOLDOWN[L.rof],                            // 8 → 5 tick
+    maxBullets: L.rof >= 9 ? 3 : L.rof >= 5 ? 2 : 1,              // đạn cùng lúc trên sân (giới hạn thật của tốc bắn)
+    bulletSpeed: 6 + 2 * (L.bspeed - 1) / 9,                      // 6 → 8 px/tick
+    dmg: Math.round(10 * (1 + 0.111 * (L.power - 1))),            // máu ×10: 10 → 20 (armor chết nửa số phát)
+    plateTicks: L.armor >= 2 ? Math.round(TICK_HZ * 60 * Math.pow(0.9, L.armor - 2)) : 0, // lớp giáp đỡ 1 phát
+  };
+}
+function upgradeCostTotal(from, to) { let g = 0; for (let i = from + 1; i <= to; i++) g += UPGRADE_COST[i]; return g; }
+
+// Bảng màn: độ khó CỐ ĐỊNH theo số màn (không theo cấp đội). rec = cấp khuyến nghị (mọi chỉ số).
+// fire = hệ số fireProb địch · armorHp = máu armor (đơn vị đạn cấp 1) · armorPct = % armor trong hàng đợi
+// speed = +tốc mọi địch · extra = +địch tối đa trên sân (trần 9) · fastBullet = tốc đạn địch fast/basic
+const CAMPAIGN_STAGES = 24;
+function campaignStage(n) {
+  n = Math.max(1, Math.min(CAMPAIGN_STAGES, n | 0));
+  const t = (n - 1) / (CAMPAIGN_STAGES - 1);                      // 0..1
+  return {
+    n, map: (n - 1) % MAPS.length,
+    rec: Math.min(UPGRADE_MAX, 1 + Math.floor((n - 1) * 9 / (CAMPAIGN_STAGES - 4))) ,
+    fire: +(1 + 0.2 * t).toFixed(2),
+    armorHp: 4 + Math.floor(3.99 * t),
+    hp: 1 + Math.floor(1.99 * t),                                 // máu địch thường (basic/fast/power)
+    armorPct: Math.round(10 + 30 * t),
+    speed: 0,
+    extra: 0,
+    enemyBullet: n >= 10 ? 5 : 4,
+  };
+}
+function buildCampaignQueue(cs, count) {
+  const q = [];
+  for (let i = 0; i < count; i++) {
+    const r = (i * 37 + cs.n * 11) % 100;
+    let t;
+    if (r < cs.armorPct) t = 'armor';
+    else if (r < cs.armorPct + 20) t = 'fast';
+    else if (r < cs.armorPct + 40) t = 'power';
+    else t = 'basic';
+    q.push(t);
+  }
+  return q;
+}
+
 const POWERUP_TYPES = ['star', 'grenade', 'clock', 'shovel', 'tank', 'helmet'];
 
 // --- Stage maps authored at 13x13 "big tile" resolution, each cell -> 2x2 small tiles.
@@ -175,6 +236,8 @@ class Game {
     this.stageClearAt = 0;
     this.maxActive = maxActiveEnemies(1);
     this.friendlyFire = true;  // room option, toggled from the waiting room
+    this.mode = 'standard';    // 'standard' (= game gốc, BXH) | 'campaign' (cấp thật, 1 màn đánh số)
+    this.campaignN = 1;
   }
 
   nextId() { return this.idCounter++; }
@@ -222,7 +285,7 @@ class Game {
   }
 
   startGame() {
-    this.stage = 1;
+    this.stage = this.mode === 'campaign' ? this.campaignN : 1;
     for (const p of this.players.values()) { p.lives = START_LIVES; p.level = 0; p.score = 0; }
     this.loadStage(this.stage);
   }
@@ -232,7 +295,9 @@ class Game {
   }
 
   loadStage(stage) {
-    this.grid = buildGrid((stage - 1) % MAPS.length);
+    const cs = this.mode === 'campaign' ? campaignStage(stage) : null;
+    this.cs = cs;
+    this.grid = buildGrid(cs ? cs.map : (stage - 1) % MAPS.length);
     this.mapDelta = [];
     this.tanks = [];
     this.bullets = [];
@@ -240,8 +305,8 @@ class Game {
     this.effects = [];
     // squad size is locked in at stage start; late joiners raise it next stage
     const n = this.players.size;
-    this.enemyQueue = buildQueue(stage, stageEnemyCount(n));
-    this.maxActive = maxActiveEnemies(n);
+    this.enemyQueue = cs ? buildCampaignQueue(cs, stageEnemyCount(n)) : buildQueue(stage, stageEnemyCount(n));
+    this.maxActive = cs ? Math.min(MAX_ACTIVE_CAP + 1, maxActiveEnemies(n) + cs.extra) : maxActiveEnemies(n);
     this.spawnedCount = 0;
     this.spawnCooldown = TICK_HZ; // 1s before first enemy
     this.spawnPointIdx = 0;
@@ -268,6 +333,17 @@ class Game {
 
   makePlayerTank(p, x, y) {
     const lvl = p.level;
+    if (this.mode === 'campaign') {
+      const st = statsFor(p.levels, 'campaign');
+      return {
+        id: this.nextId(), kind: 'player', slot: p.slot, color: p.color,
+        x, y, w: TANK, h: TANK, dir: UP, moving: false, speed: st.speed, moveAcc: 0,
+        baseBulletSpeed: st.bulletSpeed, bulletSpeed: lvl >= 1 ? Math.max(8, st.bulletSpeed) : st.bulletSpeed,
+        rofBullets: st.maxBullets, maxBullets: Math.max(lvl >= 2 ? 2 : 1, st.maxBullets), canDestroySteel: lvl >= 3, fireCooldown: st.fireCooldown, cooldown: 0,
+        dmg: st.dmg, plateTicks: st.plateTicks, plateReadyAt: 0,
+        hp: 1, spawnUntil: 0, shieldUntil: 0, stunUntil: 0, dead: false, blocked: false,
+      };
+    }
     return {
       id: this.nextId(), kind: 'player', slot: p.slot, color: p.color,
       x, y, w: TANK, h: TANK, dir: UP, moving: false, speed: 2,
@@ -280,8 +356,8 @@ class Game {
   refreshPlayerTankStats(p) {
     const t = p.tankId != null ? this.tanks.find(k => k.id === p.tankId) : null;
     if (!t) return;
-    t.bulletSpeed = p.level >= 1 ? 8 : 6;
-    t.maxBullets = p.level >= 2 ? 2 : 1;
+    t.bulletSpeed = t.baseBulletSpeed ? (p.level >= 1 ? Math.max(8, t.baseBulletSpeed) : t.baseBulletSpeed) : (p.level >= 1 ? 8 : 6);
+    t.maxBullets = Math.max(p.level >= 2 ? 2 : 1, t.rofBullets || 1);
     t.canDestroySteel = p.level >= 3;
   }
 
@@ -323,7 +399,9 @@ class Game {
     if (!tank.moving) return 0;
     const [dx, dy] = DIR[tank.dir];
     let moved = 0;
-    for (let s = 0; s < tank.speed; s++) {
+    let steps = tank.speed;
+    if (tank.moveAcc !== undefined) { tank.moveAcc += tank.speed; steps = Math.floor(tank.moveAcc); tank.moveAcc -= steps; }
+    for (let s = 0; s < steps; s++) {
       const nx = tank.x + dx, ny = tank.y + dy;
       if (this.rectHitsSolidTiles(nx, ny, tank.w, tank.h)) break;
       if (this.hitsOtherTank(tank, nx, ny)) break;
@@ -348,6 +426,7 @@ class Game {
       dir: tank.dir, speed: tank.bulletSpeed, ownerId: tank.id, ownerKind: tank.kind,
       power: !!tank.canDestroySteel, dead: false,
     });
+    if (tank.dmg) { const nb = this.bullets[this.bullets.length - 1]; nb.dmg = tank.dmg; nb.acc = 0; }
     this.emit('shoot');
   }
 
@@ -366,12 +445,16 @@ class Game {
     const type = this.enemyQueue.shift();
     const tpl = ENEMY_TEMPLATE[type];
     const isBonus = isBonusIndex(this.spawnedCount);
-    const speed = tpl.speed + (this.stage >= 4 ? 1 : 0);
+    const cs = this.cs;
+    const speed = cs ? tpl.speed + cs.speed : tpl.speed + (this.stage >= 4 ? 1 : 0);
+    // campaign: máu ×10 (đạn người chơi gây 10..14); armor theo bảng màn
+    const hp = cs ? (type === 'armor' ? cs.armorHp : cs.hp) * 10 : tpl.hp;
     this.tanks.push({
       id: this.nextId(), kind: 'enemy', enemyType: type, tclass: tpl.tclass,
       x: sp.x, y: sp.y, w: TANK, h: TANK, dir: DOWN, moving: true, speed,
-      bulletSpeed: tpl.bulletSpeed, fireProb: tpl.fireProb, fireCooldown: 20, cooldown: 0,
-      hp: tpl.hp, maxHp: tpl.hp, score: tpl.score, bonus: isBonus,
+      bulletSpeed: cs ? Math.max(tpl.bulletSpeed, cs.enemyBullet) : tpl.bulletSpeed,
+      fireProb: cs ? tpl.fireProb * cs.fire : tpl.fireProb, fireCooldown: 20, cooldown: 0,
+      hp, maxHp: hp, hpUnit: cs ? 10 : 0, score: tpl.score, bonus: isBonus,
       spawnUntil: this.tick + Math.round(TICK_HZ * 1.0), shieldUntil: 0,
       dead: false, blocked: false, aiTimer: 0,
     });
@@ -416,7 +499,9 @@ class Game {
   }
 
   updateBullet(b) {
-    for (let s = 0; s < b.speed && !b.dead; s++) {
+    let steps = b.speed;
+    if (b.acc !== undefined) { b.acc += b.speed; steps = Math.floor(b.acc); b.acc -= steps; }
+    for (let s = 0; s < steps && !b.dead; s++) {
       b.x += DIR[b.dir][0]; b.y += DIR[b.dir][1];
       // out of bounds
       if (b.x < 0 || b.y < 0 || b.x + b.w > FIELD_W || b.y + b.h > FIELD_H) { b.dead = true; this.emit('hitSteel'); break; }
@@ -451,7 +536,7 @@ class Game {
   }
 
   damageEnemy(t, b) {
-    t.hp--;
+    if (t.hpUnit) t.hp -= (b.dmg || 10); else t.hp--;
     if (t.hp > 0) { this.emit('hitSteel'); return; }
     // destroyed
     t.dead = true;
@@ -472,6 +557,12 @@ class Game {
 
   damagePlayer(t) {
     if (t.shieldUntil > this.tick) return;
+    if (t.plateTicks && this.tick >= t.plateReadyAt) {   // campaign: lớp giáp đỡ 1 phát rồi nạp lại
+      t.plateReadyAt = this.tick + t.plateTicks;
+      t.shieldUntil = this.tick + Math.round(TICK_HZ * 0.5);
+      this.emit('plate');
+      return;
+    }
     t.dead = true;
     this.effects.push({ id: this.nextId(), kind: 'boom', x: t.x + t.w / 2, y: t.y + t.h / 2, life: 14, born: this.tick });
     this.emit('explodeTank');
@@ -558,7 +649,7 @@ class Game {
     this.events = [];
     this.mapDelta = [];
 
-    if (this.status === 'lobby' || this.status === 'waiting' || this.status === 'gameover') {
+    if (this.status === 'lobby' || this.status === 'waiting' || this.status === 'gameover' || this.status === 'campaignclear') {
       return; // frozen; still broadcast for overlay/animation
     }
 
@@ -628,6 +719,7 @@ class Game {
 
     // win / lose
     if (this.baseAlive && this.enemyQueue.length === 0 && this.activeEnemies() === 0) {
+      if (this.mode === 'campaign') { this.status = 'campaignclear'; this.emit('campaignClear'); return; } // 1 màn / lượt
       this.status = 'stageclear';
       this.stageClearAt = this.tick + Math.round(TICK_HZ * 3);
       return;
@@ -653,7 +745,7 @@ class Game {
       sh: t.shieldUntil > this.tick ? 1 : 0,
       st: t.stunUntil > this.tick ? 1 : 0,
       et: t.enemyType || '', tc: t.tclass ?? -1, bo: t.bonus ? 1 : 0,
-      hp: t.hp, mh: t.maxHp || 1,
+      hp: t.hpUnit ? Math.ceil(t.hp / t.hpUnit) : t.hp, mh: t.hpUnit ? Math.ceil(t.maxHp / t.hpUnit) : (t.maxHp || 1),
     }));
     // s = slot người bắn (chỉ để client vẽ kiểu đạn cosmetic; engine không đọc lại)
     const slotOfTank = {};
@@ -714,6 +806,34 @@ var COS_RE = {
 };
 var cosOf = {};                   // slot -> { tank, bullet, eagle, map }
 
+// ── Progression (mode Chiến dịch) ─────────────────────────────────────────────
+// levelsOf: cấp 5 chỉ số do HOST (DO, đọc D1) đưa vào lúc join — không bao giờ lấy từ client.
+// Mode Chuẩn: p.levels luôn bị xoá -> engine chạy y như game gốc.
+var levelsOf = {};                // slot -> {move,rof,bspeed,power,armor}
+var killsOf = {};                 // slot -> số địch hạ trong lượt hiện tại
+var runSeq = 0, runStatus = '';   // để phát kết quả lượt đúng 1 lần mỗi lần vào campaignclear/gameover
+// Đếm hạ địch theo slot mà không sửa game.js: bọc damageEnemy của RIÊNG instance này.
+var _damageEnemy = game.damageEnemy;
+game.damageEnemy = function (t, b) {
+  var was = t.dead;
+  _damageEnemy.call(this, t, b);
+  if (!was && t.dead && b) {
+    var ot = this.tanks.find(function (k) { return k.id === b.ownerId; });
+    if (ot && ot.kind === 'player' && ot.slot !== undefined) killsOf[ot.slot] = (killsOf[ot.slot] || 0) + 1;
+  }
+};
+function applyLevels() {
+  game.players.forEach(function (p) {
+    if (game.mode === 'campaign' && levelsOf[p.slot]) p.levels = cleanLevels(levelsOf[p.slot]);
+    else delete p.levels;
+  });
+}
+function setMode(mode, n) {
+  if (mode === 'standard' || mode === 'campaign') game.mode = mode;
+  if (typeof n === 'number' && isFinite(n)) game.campaignN = Math.max(1, Math.min(CAMPAIGN_STAGES, n | 0));
+  applyLevels();
+}
+
 function cleanCos(c) {
   var out = {};
   if (!c || typeof c !== 'object') return out;
@@ -737,6 +857,8 @@ function writeState(room) {
   st.enemiesLeft = s.enemiesLeft;
   st.base = s.base;
   st.friendlyFire = s.friendlyFire;
+  st.mode = game.mode;
+  st.campaignN = game.campaignN;
 
   // keyed-by-id: xoá một thực thể = một op delete, không dịch cả mảng
   var tanks = {}, i;
@@ -773,6 +895,9 @@ function writeState(room) {
 }
 
 module.exports = {
+  // Hằng số engine cho Worker (cf/progression.mjs) — một nguồn duy nhất là game.js
+  progression: { UPGRADE_STATS: UPGRADE_STATS, UPGRADE_MAX: UPGRADE_MAX, UPGRADE_COST: UPGRADE_COST,
+    CAMPAIGN_STAGES: CAMPAIGN_STAGES, campaignStage: campaignStage, cleanLevels: cleanLevels },
   config: { tickRate: TICK_HZ, maxPlayers: 4 },
 
   initialState: function () {
@@ -782,7 +907,7 @@ module.exports = {
       dims: { tile: TILE, cols: COLS, rows: ROWS },
       tick: 0, stage: 1, status: 'lobby', frozen: 0, enemiesLeft: 0, friendlyFire: true,
       tanks: {}, bullets: {}, players: {}, powerups: [], skins: {}, cos: {}, roomCos: { eagle: null, map: null },
-      base: { x: 0, y: 0, alive: true },
+      base: { x: 0, y: 0, alive: true }, mode: 'standard', campaignN: 1,
       map: game.fullMap(),
     };
   },
@@ -791,6 +916,10 @@ module.exports = {
   onCreate: function (room, opts) {
     if (opts && typeof opts.friendlyFire === 'boolean') game.friendlyFire = opts.friendlyFire;
     room.state.friendlyFire = game.friendlyFire;
+    // mode/campaignN: host (DO) đã kiểm cờ PROGRESSION_ON và màn đã mở trước khi đưa vào đây
+    if (opts && (opts.mode || opts.campaignN)) setMode(opts.mode, opts.campaignN);
+    room.state.mode = game.mode;
+    room.state.campaignN = game.campaignN;
   },
 
   onJoin: function (room, player) {
@@ -800,6 +929,9 @@ module.exports = {
     // player.cos (mới) hoặc player.skin (host cũ): chỉ nhận SKU đúng dạng của từng slot
     var c = cleanCos(player.cos || (player.skin ? { tank: player.skin } : null));
     if (Object.keys(c).length) cosOf[p.slot] = c; else delete cosOf[p.slot];
+    if (player.levels && typeof player.levels === 'object') levelsOf[p.slot] = cleanLevels(player.levels); else delete levelsOf[p.slot];
+    killsOf[p.slot] = 0;
+    applyLevels();
     room.send(player.id, 'you', { slot: p.slot, color: p.color });
     writeState(room);
   },
@@ -810,6 +942,8 @@ module.exports = {
     game.removePlayer(slot);
     delete slotOf[player.id];
     delete cosOf[slot];
+    delete levelsOf[slot];
+    delete killsOf[slot];
   },
 
   onMessage: function (room, player, type, d) {
@@ -839,6 +973,11 @@ module.exports = {
         game.friendlyFire = d.friendlyFire;
         writeState(room);
       }
+      // mode/màn: DO lọc trước (cờ PROGRESSION_ON + màn ≤ max_cleared+1) rồi mới chuyển tới đây
+      if (d && (d.mode === 'standard' || d.mode === 'campaign' || typeof d.campaignN === 'number')) {
+        setMode(d.mode, d.campaignN);
+        writeState(room);
+      }
     } else if (type === 'skin' || type === 'cos') {
       // Host đổi cosmetic giữa trận (sau khi mua/trang bị). Chỉ host (DO) gửi được
       // loại này — client gửi 'msg' với n='skin'/'cos' sẽ bị DO chặn trước khi tới đây.
@@ -847,14 +986,37 @@ module.exports = {
         if (Object.keys(nc).length) cosOf[slot] = nc; else delete cosOf[slot];
         writeState(room);
       }
+    } else if (type === 'levels') {
+      // Host đổi cấp giữa chừng (sau khi nâng cấp). Chỉ host (DO) gửi được; áp dụng từ lần spawn kế.
+      if (player.trusted && d && d.levels && typeof d.levels === 'object') {
+        levelsOf[slot] = cleanLevels(d.levels);
+        if (game.status !== 'playing' && game.status !== 'stageclear') applyLevels();
+      }
     } else if (type === 'start') {
       if (game.status === 'waiting') game.startGame();
-      else if (game.status === 'gameover') game.restart();
+      else if (game.status === 'gameover' || game.status === 'campaignclear') { applyLevels(); game.restart(); }
     }
   },
 
   onTick: function (room) {
+    var before = game.status;
+    if (before === 'playing' && runStatus !== 'playing') {    // lượt mới bắt đầu
+      runStatus = 'playing'; runSeq++;
+      for (var ks in killsOf) killsOf[ks] = 0;
+    }
     game.update();
+    if (game.status !== before && (game.status === 'campaignclear' || game.status === 'gameover')) {
+      runStatus = game.status;
+      if (game.mode === 'campaign') {
+        // Hợp đồng sự kiện kết quả lượt -> host (DO) ghi thưởng (idempotent theo runId:player)
+        var kills = {}, slots = {};
+        for (var pid in slotOf) { var sl = slotOf[pid]; kills[sl] = killsOf[sl] || 0; slots[sl] = pid; }
+        var ev = { runId: (room.code || 'ROOM') + '-' + runSeq + '-' + game.tick, mode: 'campaign', stage: game.campaignN,
+          win: game.status === 'campaignclear', kills: kills, slots: slots };
+        if (typeof room.runResult === 'function') { try { room.runResult(ev); } catch (e) { room.log('runResult ' + e); } }
+        room.broadcast('runResult', ev);
+      }
+    }
 
     // Đổi màn -> đẩy bản đồ đầy đủ một lần, không gửi mỗi tick
     var key = game.stage + ':' + game.status;
@@ -867,6 +1029,8 @@ module.exports = {
 
   onDispose: function (room) {
     // Nộp điểm cuối trận. Đi qua room server nên platform đánh dấu verified.
+    // Chỉ mode Chuẩn lên BXH: Chiến dịch có cấp thật nên điểm không so được.
+    if (game.mode !== 'standard') return;
     var vals = [];
     for (var id in slotOf) {
       var p = game.players.get(slotOf[id]);
