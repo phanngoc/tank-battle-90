@@ -18,7 +18,10 @@ const sweep = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const runsPerDay = +arg('runs', 3);
 const byStage = Object.fromEntries(sweep.rows.map(r => [r.stage, r]));
 const recOf = n => E.campaignStage(n).rec;
-const win = (n, L) => (byStage[n] ? byStage[n].win[L - 1] : 50) / 100;
+// sweep.json (win[]) hoặc campaign-verify.json (winL1 + winAtSuggest ở cấp khuyến nghị; cấp cao hơn coi như bằng — bảo thủ)
+const win = (n, L) => { const r = byStage[n]; if (!r) return 0.5;
+  if (r.win) return r.win[L - 1] / 100;
+  return (L >= r.suggest ? r.winAtSuggest : r.winL1) / 100; };
 const levelCost = L => 5 * E.UPGRADE_COST[L];             // nâng đều 5 chỉ số lên cấp L
 
 function simulate(payer, maxDays = 400) {

@@ -100,7 +100,7 @@ function campaignStage(n) {
   };
 }
 // Cấp khuyến nghị (đều 5 chỉ số) theo màn — lấy từ test/campaign-sweep.js (cấp thấp nhất đội 2 người thắng ≥ 50%)
-const CAMPAIGN_REC = [1, 1, 1, 1, 2, 2, 2, 2, 4, 5, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 10, 10];
+const CAMPAIGN_REC = [1, 1, 2, 2, 2, 2, 2, 4, 6, 6, 6, 6, 7, 7, 9, 9, 9, 9, 10, 10, 10, 10, 10, 10];
 function buildCampaignQueue(cs, count) {
   const q = [];
   for (let i = 0; i < count; i++) {
