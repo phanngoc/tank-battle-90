@@ -54,7 +54,9 @@ function bot(code, token) {
     gate('trang tải + đăng nhập guest', await waitFor(cdp, 'typeof arcade !== "undefined" && arcade && !!arcade.playerId', 10000));
 
     await click(cdp, '#shopBtn');
-    gate('mở cửa hàng: 6 tab', await waitFor(cdp, 'document.querySelectorAll(".shop-tab").length === 6'));
+    // 6 tab cosmetic; khi PROGRESSION_ON có thêm tab "Nâng cấp" (data-tab=up) đứng đầu
+    gate('mở cửa hàng: 6 tab (+ Nâng cấp khi bật progression)', await waitFor(cdp,
+      '(() => { const n = document.querySelectorAll(".shop-tab").length, up = !!document.querySelector(".shop-tab[data-tab=up]"); return n === (up ? 7 : 6); })()'));
     const counts = {};
     for (const t of ['tank', 'bullet', 'eagle', 'map', 'bundle']) {
       await click(cdp, `.shop-tab[data-tab="${t}"]`); await sleep(250);
