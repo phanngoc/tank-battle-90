@@ -13,7 +13,8 @@
     "smoke:cf": "node test/cf-smoke.js",
     "smoke:cf:economy": "node test/cf-economy-smoke.mjs",
     "dev:cf": "npm run build:cf && npx wrangler@4 d1 migrations apply tank-entitlements --local && npx wrangler@4 dev --local --local-upstream 127.0.0.1:8787",
-    "playtest:shop": "node test/shop-playtest.js"
+    "playtest:shop": "node test/shop-playtest.js",
+    "playtest:laser": "node test/laser-playtest.js"
   },
   "dependencies": {
     "ws": "^8.21.3"

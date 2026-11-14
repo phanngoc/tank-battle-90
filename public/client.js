@@ -131,6 +131,7 @@ function wireRoom(r) {
   r.onEvent('fx', function (list) { for (var i = 0; i < list.length; i++) playSfx(list[i]); });
   r.onEvent('mapDelta', function (list) { for (var i = 0; i < list.length; i++) applyDelta(list[i].x, list[i].y, list[i].t); });
   r.onEvent('effects', function (list) { pendingEffects = list || []; });
+  r.onEvent('beam', function (list) { for (var i = 0; i < list.length; i++) addBeam(list[i]); });
   r.onError(function (e) {
     showErr(e.code === 'ROOM_FULL' ? 'Phòng đã đủ 4 người.'
       : e.code === 'ROOM_NOT_FOUND' ? 'Không tìm thấy phòng.' : (e.msg || e.code));
@@ -151,6 +152,7 @@ function wireRoom(r) {
 
     statusText = s.status;
     if (typeof s.friendlyFire === 'boolean') friendlyFire = s.friendlyFire;
+    if (s.mode && s.mode !== roomMode) { roomMode = s.mode; renderItemBar(); updateModeTag(); }
     var legacy = toLegacy(s);
     latest = legacy;
     pendingEffects = [];
@@ -167,7 +169,10 @@ let canvasReady = false;
 async function createRoom() {
   ensureAudio(); showErr('');
   var fest = festivalToggle && festivalToggle.checked;
-  try { wireRoom(await arcade.rooms.create('coop', fest ? { festival: true } : undefined, getName())); if (fest) refreshOwned(); }
+  var opts = {};
+  if (fest) opts.festival = true;
+  if (casualToggle && casualToggle.checked) opts.mode = 'casual';
+  try { wireRoom(await arcade.rooms.create('coop', Object.keys(opts).length ? opts : undefined, getName())); if (fest) refreshOwned(); }
   catch (e) { showErr('Không tạo được phòng: ' + e.message); }
 }
 
@@ -391,6 +396,7 @@ function render() {
   }
 
   for (const f of clientFx) drawClientFx(f);
+  drawBeams();
   ctx.drawImage(forest, 0, 0); // bushes conceal tanks underneath
   drawMapOverlay(0, 0, FIELD_W, FIELD_H, tick);
 
@@ -757,6 +763,7 @@ function playSfx(e) {
     case 'freeze': tone(160, 0.3, 'sine', 0.05); break;
     case 'spawn': tone(1000, 0.03, 'sine', 0.02); break;
     case 'stun': tone(300, 0.12, 'triangle', 0.05); setTimeout(() => tone(240, 0.12, 'triangle', 0.05), 90); break;
+    case 'zap': tone(1800, 0.05, 'sawtooth', 0.035); setTimeout(() => tone(900, 0.07, 'sawtooth', 0.03), 30); break;
     case 'revive': tone(523, 0.08, 'square', 0.05); setTimeout(() => tone(784, 0.08, 'square', 0.05), 80); setTimeout(() => tone(1046, 0.12, 'square', 0.05), 160); break;
   }
 }
@@ -1162,6 +1169,63 @@ async function buy(sku, card) {
   }
   pollTimer = setInterval(check, 3000);
 }
+// ═══ Súng thật (docs/tank-weapons-design.md): mode phòng + tia Laser ═══
+// Server là nguồn sự thật: chỉ phòng mode 'casual' mới có tia (engine fireBeam). Client chỉ vẽ.
+let roomMode = 'standard';
+let casualToggle = null;
+const beams = [];                    // {x1,y1,x2,y2,slot,t}
+const BEAM_MS = 200;                 // 6 tick @30Hz
+const LASER_CD_MS = 1000;            // hồi chiêu 30 tick (engine WEAPONS)
+let laserReadyAt = 0;
+function addBeam(b) {
+  if (!b) return;
+  beams.push({ x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2, slot: b.ownerSlot, t: performance.now() });
+  if (b.ownerSlot === me) { laserReadyAt = performance.now() + LASER_CD_MS; shakeScreen(); startCooldownRing(); }
+}
+function drawBeams() {
+  const now = performance.now();
+  for (let i = beams.length - 1; i >= 0; i--) if (now - beams[i].t > BEAM_MS) beams.splice(i, 1);
+  for (const b of beams) {
+    const k = 1 - (now - b.t) / BEAM_MS;            // 1 → 0
+    const pc = PLAYER_COLOR_BY_SLOT[b.slot] || '#ffffff';
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.globalAlpha = 0.35 * k; ctx.strokeStyle = '#4ff0ff'; ctx.lineWidth = 10;
+    ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
+    ctx.globalAlpha = 0.9 * k; ctx.strokeStyle = '#bff9ff'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
+    ctx.globalAlpha = k; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.stroke();
+    // flash ở nòng (màu người bắn để đồng đội biết tia của ai) + ở điểm chạm
+    ctx.globalAlpha = k; ctx.fillStyle = pc;
+    ctx.beginPath(); ctx.arc(b.x1, b.y1, 4 + 3 * k, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#e8ffff';
+    ctx.beginPath(); ctx.arc(b.x2, b.y2, 3 + 5 * k, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+}
+const PLAYER_COLOR_BY_SLOT = ['#f2d024', '#57c451', '#3fb7d6', '#e07b34'];
+function shakeScreen() {
+  cv.classList.remove('shake'); void cv.offsetWidth; cv.classList.add('shake');
+}
+function startCooldownRing() {
+  const btn = itemBar && itemBar.querySelector('.ib-btn[data-sku="tank.bullet.laser"]');
+  if (!btn) return;
+  btn.classList.add('cd');
+  const tick = () => {
+    const left = laserReadyAt - performance.now();
+    if (left <= 0) { btn.classList.remove('cd'); btn.style.removeProperty('--cd'); return; }
+    btn.style.setProperty('--cd', (left / LASER_CD_MS * 360).toFixed(0) + 'deg');
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+function updateModeTag() {
+  let tag = document.getElementById('modeTag');
+  if (!tag && ffBtn) { tag = el('div', { className: 'mode-tag', id: 'modeTag' }, ''); ffBtn.parentNode.insertBefore(tag, ffBtn); }
+  if (tag) tag.textContent = roomMode === 'casual' ? '🎈 Phòng Thường — súng có tác dụng · không tính BXH' : '🏆 Phòng Chuẩn — ai cũng đạn thường · có BXH';
+}
+
 // ── Thanh vật phẩm (điện thoại): 6 loại đạn. Đã có → chạm để dùng ngay trong trận (chạm lại = đạn mặc định);
 // chưa có → mờ + mở cửa hàng đúng món. Chỉ đổi hình đạn (cosmetic), không đổi luật/chỉ số.
 const IB_BULLETS = [['tank.bullet.laser', 'Laser', '#4ff0ff'], ['tank.bullet.plasma', 'Plasma', '#a66bff'], ['tank.bullet.fire', 'Lửa', '#ff7a1a'],
@@ -1174,7 +1238,8 @@ function renderItemBar() {
   for (const [sku, name, color] of IB_BULLETS) {
     const it = itemOf(sku), have = isOwned(sku), on = myLook.bullet === sku;
     const label = it && it.label ? it.label : name;
-    const st = on ? '● dùng' : have ? '✓ có' : '🔒 ' + (it && it.price ? Math.round(it.price / 1000) + 'k' : 'mua');
+    const gun = sku === 'tank.bullet.laser' && roomMode === 'casual';   // Laser là súng thật ở phòng Thường
+    const st = on ? (gun ? '⚡ súng' : '● dùng') : have ? '✓ có' : '🔒 ' + (it && it.price ? Math.round(it.price / 1000) + 'k' : 'mua');
     const b = el('button', { className: 'ib-btn' + (on ? ' on' : '') + (have ? '' : ' lock'), type: 'button' },
       '<span class="ib-ic"></span><span class="ib-n">' + escapeHtml(label) + '</span><span class="ib-st">' + st + '</span>');
     b.querySelector('.ib-ic').style.background = color;
@@ -1209,6 +1274,9 @@ closeShop = function () { _closeShop(); renderItemBar(); };
   lab.style.display = 'none';
   createBtn.parentNode.insertBefore(lab, createBtn);
   festivalToggle = lab.querySelector('input');
+  const lab2 = el('label', { className: 'ov-fest', id: 'casualLabel' }, '<input type="checkbox" id="casualToggle"> 🎈 Phòng Thường (Laser bắn tia thật · không tính BXH)');
+  createBtn.parentNode.insertBefore(lab2, createBtn);
+  casualToggle = lab2.querySelector('input');
   const btn2 = el('button', { className: 'ov-btn ghost', id: 'shopBtnWait' }, '🛒 Cửa hàng');
   btn2.onclick = () => openShop();
   beginBtn.parentNode.insertBefore(btn2, ffBtn.nextSibling);

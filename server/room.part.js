@@ -59,6 +59,7 @@ function writeState(room) {
   st.enemiesLeft = s.enemiesLeft;
   st.base = s.base;
   st.friendlyFire = s.friendlyFire;
+  st.mode = game.mode;
 
   // keyed-by-id: xoá một thực thể = một op delete, không dịch cả mảng
   var tanks = {}, i;
@@ -92,6 +93,7 @@ function writeState(room) {
   if (s.events && s.events.length) room.broadcast('fx', s.events);
   if (s.mapDelta && s.mapDelta.length) room.broadcast('mapDelta', s.mapDelta);
   if (s.effects && s.effects.length) room.broadcast('effects', s.effects);
+  if (s.beams && s.beams.length) room.broadcast('beam', s.beams);
 }
 
 module.exports = {
@@ -102,7 +104,7 @@ module.exports = {
       // dims thay cho message 'hello' của server cũ: client cần TILE/COLS/ROWS
       // để dựng canvas. Nằm trong state nên chỉ tốn băng thông đúng một lần.
       dims: { tile: TILE, cols: COLS, rows: ROWS },
-      tick: 0, stage: 1, status: 'lobby', frozen: 0, enemiesLeft: 0, friendlyFire: true,
+      tick: 0, stage: 1, status: 'lobby', frozen: 0, enemiesLeft: 0, friendlyFire: true, mode: 'standard',
       tanks: {}, bullets: {}, players: {}, powerups: [], skins: {}, cos: {}, roomCos: { eagle: null, map: null },
       base: { x: 0, y: 0, alive: true },
       map: game.fullMap(),
@@ -112,7 +114,10 @@ module.exports = {
   // opts của rooms.create(mode, opts): cho phép tạo phòng với { friendlyFire: false }
   onCreate: function (room, opts) {
     if (opts && typeof opts.friendlyFire === 'boolean') game.friendlyFire = opts.friendlyFire;
+    // 'casual' = phòng Thường: súng có tác dụng, KHÔNG nộp BXH. Mọi giá trị khác = Chuẩn.
+    game.mode = opts && opts.mode === 'casual' ? 'casual' : 'standard';
     room.state.friendlyFire = game.friendlyFire;
+    room.state.mode = game.mode;
   },
 
   onJoin: function (room, player) {
@@ -122,6 +127,7 @@ module.exports = {
     // player.cos (mới) hoặc player.skin (host cũ): chỉ nhận SKU đúng dạng của từng slot
     var c = cleanCos(player.cos || (player.skin ? { tank: player.skin } : null));
     if (Object.keys(c).length) cosOf[p.slot] = c; else delete cosOf[p.slot];
+    game.setWeapon(p.slot, c.bullet);
     room.send(player.id, 'you', { slot: p.slot, color: p.color });
     writeState(room);
   },
@@ -132,6 +138,7 @@ module.exports = {
     game.removePlayer(slot);
     delete slotOf[player.id];
     delete cosOf[slot];
+    game.setWeapon(slot, null);
   },
 
   onMessage: function (room, player, type, d) {
@@ -167,6 +174,7 @@ module.exports = {
       if (player.trusted && d) {
         var nc = cleanCos(type === 'cos' ? d.cos : (d.skin ? { tank: d.skin } : null));
         if (Object.keys(nc).length) cosOf[slot] = nc; else delete cosOf[slot];
+        game.setWeapon(slot, nc.bullet);
         writeState(room);
       }
     } else if (type === 'start') {
@@ -188,6 +196,7 @@ module.exports = {
   },
 
   onDispose: function (room) {
+    if (game.mode !== 'standard') return; // phòng Thường không nộp BXH
     // Nộp điểm cuối trận. Đi qua room server nên platform đánh dấu verified.
     var vals = [];
     for (var id in slotOf) {
