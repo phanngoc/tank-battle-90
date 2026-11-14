@@ -300,3 +300,17 @@ body.sheet-open { overflow: hidden; touch-action: none; }
   .shop-modal { align-items: stretch; }
   .shop-card { max-height: 100vh; max-height: 100dvh; border-radius: 0; }
 }
+
+/* ── Progression: tab Nâng cấp + chọn mode/màn ở phòng chờ (chỉ khi PROGRESSION_ON) ── */
+.up-box { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.up-wallet { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 15px; padding: 6px 2px; }
+.up-wallet .up-day { margin-left: auto; font-size: 12px; color: #9aa3bd; }
+.up-row { display: flex; align-items: center; gap: 8px; min-width: 0; background: #1d2230; border: 1px solid #2f3648; border-radius: 10px; padding: 6px 8px; }
+.up-n { flex: 1 1 auto; min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.up-lv { flex: none; font-size: 12px; color: #cfd6ea; }
+.up-btn { flex: none; min-height: 44px; min-width: 96px; margin: 0; padding: 0 10px; font-size: 13px; width: auto; }
+.mode-row { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; width: 100%; max-width: 100%; }
+.mode-seg { display: flex; gap: 0; border: 1px solid #3a4258; border-radius: 10px; overflow: hidden; }
+.mode-seg button { min-height: 44px; padding: 0 14px; background: #262c3d; color: #cfd6ea; border: 0; font-size: 14px; cursor: pointer; }
+.mode-seg button.on { background: #ffd23f; color: #1d2230; font-weight: 700; }
+.mode-stage { min-height: 44px; max-width: 100%; background: #262c3d; color: #fff; border: 1px solid #3a4258; border-radius: 10px; padding: 0 8px; font-size: 14px; }
