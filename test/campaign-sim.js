@@ -39,7 +39,7 @@ function botDecide(g, p, mem) {
     p.ctrl.dir = vert ? (bx > cx ? 3 : 1) : (by > cy ? 0 : 2); p.ctrl.moving = true; return;
   }
   const near = en.filter(e => Math.hypot(e.x + 16 - BX, e.y + 16 - BY) < 170);
-  const defender = p.slot === 0;
+  const defender = p.slot === 0 && g.players.size > 1;
   let pool = near.length ? near : (defender ? en.filter(e => alignedShot(t, e)) : en);
   if (!pool.length) return goPost(p, t, mem);
   let best = null, bs = 1e9;
@@ -50,8 +50,37 @@ function botDecide(g, p, mem) {
   const dx = best.x + 16 - cx, dy = best.y + 16 - cy;
   if (Math.abs(dx) < 10) { p.ctrl.dir = dy > 0 ? 2 : 0; p.ctrl.moving = Math.abs(dy) > 64 && !defender; return; }
   if (Math.abs(dy) < 10) { p.ctrl.dir = dx > 0 ? 1 : 3; p.ctrl.moving = Math.abs(dx) > 64 && !defender; return; }
-  if (Math.abs(dx) < Math.abs(dy)) p.ctrl.dir = dx > 0 ? 1 : 3; else p.ctrl.dir = dy > 0 ? 2 : 0;
+  const pd = pathDir(g, t, best.x, best.y, mem);
+  if (pd != null) p.ctrl.dir = pd;
+  else if (Math.abs(dx) < Math.abs(dy)) p.ctrl.dir = dx > 0 ? 1 : 3; else p.ctrl.dir = dy > 0 ? 2 : 0;
   p.ctrl.moving = true;
+}
+// BFS trên lưới 16px cho xe 2×2 ô: gạch đi được (bot luôn bắn phá), thép/nước/nhà thì không.
+function pathDir(g, t, tx, ty, mem) {
+  if (mem.pathAt && g.tick - mem.pathAt < 8 && mem.pathDir != null) return mem.pathDir;
+  const C = 25, ok = (c, r) => { if (c < 0 || r < 0 || c >= C || r >= C) return false;
+    for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) { const v = g.grid[r + dy][c + dx]; if (v === 2 || v === 3 || v === 6) return false; } return true; };
+  const sc = Math.round(t.x / 16), sr = Math.round(t.y / 16);
+  const gc = Math.max(0, Math.min(24, Math.round(tx / 16))), gr = Math.max(0, Math.min(24, Math.round(ty / 16)));
+  const prev = new Int16Array(C * C).fill(-1), q = [sr * C + sc]; prev[q[0]] = q[0];
+  let found = -1;
+  for (let i = 0; i < q.length; i++) {
+    const cur = q[i], c = cur % C, r = (cur / C) | 0;
+    if (Math.abs(c - gc) <= 1 && Math.abs(r - gr) <= 1) { found = cur; break; }
+    for (let d = 0; d < 4; d++) {
+      const nc = c + [0, 1, 0, -1][d], nr = r + [-1, 0, 1, 0][d], k = nr * C + nc;
+      if (nc < 0 || nr < 0 || nc >= C || nr >= C || prev[k] !== -1 || !ok(nc, nr)) continue;
+      prev[k] = cur; q.push(k);
+    }
+  }
+  let dir = null;
+  if (found >= 0 && found !== q[0]) {
+    let k = found; while (prev[k] !== q[0]) k = prev[k];
+    const c = k % C, r = (k / C) | 0;
+    dir = r < sr ? 0 : c > sc ? 1 : r > sr ? 2 : 3;
+  }
+  mem.pathAt = g.tick; mem.pathDir = dir;
+  return dir;
 }
 function alignedShot(t, e) { return Math.abs(e.x - t.x) < 10 || Math.abs(e.y - t.y) < 10; }
 // trạm gác: người giữ nhà đứng trên nóc đại bàng nhìn lên; người khác ra giữa sân
@@ -73,7 +102,7 @@ function safeFire(t, dir) {
 // SIM_HANDICAP: bot phản xạ kém người thật, nên trong sim mọi địch bắn ít đi theo hệ số này
 // (cả mode Chuẩn lẫn Chiến dịch => so sánh tương đối vẫn đúng). Chỉnh sao cho bot thắng
 // mode Chuẩn màn 1 solo ≈ 65–75% (= "người chơi trung bình"). Không có trong game thật.
-let SIM_HANDICAP = +(process.env.SIM_HANDICAP || 0.15);
+let SIM_HANDICAP = +(process.env.SIM_HANDICAP || 0.3);
 function setHandicap(k) { SIM_HANDICAP = k; }
 function runOne(stage, lvl, nPlayers, seed) {
   const orig = Math.random; Math.random = mulberry32(seed);

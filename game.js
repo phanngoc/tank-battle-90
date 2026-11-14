@@ -83,12 +83,12 @@ function campaignStage(n) {
   return {
     n, map: (n - 1) % MAPS.length,
     rec: Math.min(UPGRADE_MAX, 1 + Math.floor((n - 1) * 9 / (CAMPAIGN_STAGES - 4))) ,
-    fire: +(1 + 0.3 * t).toFixed(2),
-    armorHp: 4 + Math.floor(4.99 * t),
-    hp: 1 + Math.floor(2.99 * t),                                 // máu địch thường (basic/fast/power)
-    armorPct: Math.round(10 + 40 * t),
+    fire: +(1 + 0.2 * t).toFixed(2),
+    armorHp: 4 + Math.floor(3.99 * t),
+    hp: 1 + Math.floor(1.99 * t),                                 // máu địch thường (basic/fast/power)
+    armorPct: Math.round(10 + 30 * t),
     speed: 0,
-    extra: n >= 18 ? 1 : 0,
+    extra: 0,
     enemyBullet: n >= 10 ? 5 : 4,
   };
 }
