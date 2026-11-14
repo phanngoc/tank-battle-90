@@ -82,21 +82,29 @@ function upgradeCostTotal(from, to) { let g = 0; for (let i = from + 1; i <= to;
 // fire = hệ số fireProb địch · armorHp = máu armor (đơn vị đạn cấp 1) · armorPct = % armor trong hàng đợi
 // speed = +tốc mọi địch · extra = +địch tối đa trên sân (trần 9) · fastBullet = tốc đạn địch fast/basic
 const CAMPAIGN_STAGES = 24;
+// Chiến dịch xoay map 1 ↔ map 2. Map 3 khó hơn hẳn (bot sim: cấp 10 không qua 50% ở nửa sau) nên
+// chưa dùng trong Chiến dịch; mode Chuẩn vẫn đủ 3 map. Map 2 dễ hơn map 1 ⇒ cộng bù độ khó.
+const CAMPAIGN_MAPS = [0, 1];
+const CAMPAIGN_MAP_OFFSET = [0.05, 0.3, 0];
 function campaignStage(n) {
   n = Math.max(1, Math.min(CAMPAIGN_STAGES, n | 0));
   const t = (n - 1) / (CAMPAIGN_STAGES - 1);                      // 0..1
+  const map = CAMPAIGN_MAPS[(n - 1) % CAMPAIGN_MAPS.length];
+  const d = Math.min(1.5, 1.25 * t + CAMPAIGN_MAP_OFFSET[map] * Math.min(1, t * 4)); // độ khó hiệu dụng
   return {
-    n, map: (n - 1) % MAPS.length,
-    rec: Math.min(UPGRADE_MAX, 1 + Math.floor((n - 1) * 9 / (CAMPAIGN_STAGES - 4))) ,
-    fire: +(1 + 0.2 * t).toFixed(2),
-    armorHp: 4 + Math.floor(3.99 * t),
-    hp: 1 + Math.floor(1.99 * t),                                 // máu địch thường (basic/fast/power)
-    armorPct: Math.round(10 + 30 * t),
+    n, map, d: +d.toFixed(3),
+    rec: CAMPAIGN_REC[n - 1],
+    fire: +(1 + 0.3 * d).toFixed(2),
+    armorHp: 4 + Math.floor(5 * d),
+    hp: 1 + Math.floor(2.5 * d),                                  // máu địch thường (basic/fast/power)
+    armorPct: Math.round(10 + 40 * Math.min(1, d)),
     speed: 0,
     extra: 0,
     enemyBullet: n >= 10 ? 5 : 4,
   };
 }
+// Cấp khuyến nghị (đều 5 chỉ số) theo màn — lấy từ test/campaign-sweep.js (cấp thấp nhất đội 2 người thắng ≥ 50%)
+const CAMPAIGN_REC = [1, 1, 1, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 9, 9, 10];
 function buildCampaignQueue(cs, count) {
   const q = [];
   for (let i = 0; i < count; i++) {
