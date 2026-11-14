@@ -36,6 +36,34 @@ var COS_RE = {
 };
 var cosOf = {};                   // slot -> { tank, bullet, eagle, map }
 
+// ── Progression (mode Chiến dịch) ─────────────────────────────────────────────
+// levelsOf: cấp 5 chỉ số do HOST (DO, đọc D1) đưa vào lúc join — không bao giờ lấy từ client.
+// Mode Chuẩn: p.levels luôn bị xoá -> engine chạy y như game gốc.
+var levelsOf = {};                // slot -> {move,rof,bspeed,power,armor}
+var killsOf = {};                 // slot -> số địch hạ trong lượt hiện tại
+var runSeq = 0, runStatus = '';   // để phát kết quả lượt đúng 1 lần mỗi lần vào campaignclear/gameover
+// Đếm hạ địch theo slot mà không sửa game.js: bọc damageEnemy của RIÊNG instance này.
+var _damageEnemy = game.damageEnemy;
+game.damageEnemy = function (t, b) {
+  var was = t.dead;
+  _damageEnemy.call(this, t, b);
+  if (!was && t.dead && b) {
+    var ot = this.tanks.find(function (k) { return k.id === b.ownerId; });
+    if (ot && ot.kind === 'player' && ot.slot !== undefined) killsOf[ot.slot] = (killsOf[ot.slot] || 0) + 1;
+  }
+};
+function applyLevels() {
+  game.players.forEach(function (p) {
+    if (game.mode === 'campaign' && levelsOf[p.slot]) p.levels = cleanLevels(levelsOf[p.slot]);
+    else delete p.levels;
+  });
+}
+function setMode(mode, n) {
+  if (mode === 'standard' || mode === 'campaign') game.mode = mode;
+  if (typeof n === 'number' && isFinite(n)) game.campaignN = Math.max(1, Math.min(CAMPAIGN_STAGES, n | 0));
+  applyLevels();
+}
+
 function cleanCos(c) {
   var out = {};
   if (!c || typeof c !== 'object') return out;
@@ -59,6 +87,8 @@ function writeState(room) {
   st.enemiesLeft = s.enemiesLeft;
   st.base = s.base;
   st.friendlyFire = s.friendlyFire;
+  st.mode = game.mode;
+  st.campaignN = game.campaignN;
 
   // keyed-by-id: xoá một thực thể = một op delete, không dịch cả mảng
   var tanks = {}, i;
@@ -95,6 +125,9 @@ function writeState(room) {
 }
 
 module.exports = {
+  // Hằng số engine cho Worker (cf/progression.mjs) — một nguồn duy nhất là game.js
+  progression: { UPGRADE_STATS: UPGRADE_STATS, UPGRADE_MAX: UPGRADE_MAX, UPGRADE_COST: UPGRADE_COST,
+    CAMPAIGN_STAGES: CAMPAIGN_STAGES, campaignStage: campaignStage, cleanLevels: cleanLevels },
   config: { tickRate: TICK_HZ, maxPlayers: 4 },
 
   initialState: function () {
@@ -104,7 +137,7 @@ module.exports = {
       dims: { tile: TILE, cols: COLS, rows: ROWS },
       tick: 0, stage: 1, status: 'lobby', frozen: 0, enemiesLeft: 0, friendlyFire: true,
       tanks: {}, bullets: {}, players: {}, powerups: [], skins: {}, cos: {}, roomCos: { eagle: null, map: null },
-      base: { x: 0, y: 0, alive: true },
+      base: { x: 0, y: 0, alive: true }, mode: 'standard', campaignN: 1,
       map: game.fullMap(),
     };
   },
@@ -113,6 +146,10 @@ module.exports = {
   onCreate: function (room, opts) {
     if (opts && typeof opts.friendlyFire === 'boolean') game.friendlyFire = opts.friendlyFire;
     room.state.friendlyFire = game.friendlyFire;
+    // mode/campaignN: host (DO) đã kiểm cờ PROGRESSION_ON và màn đã mở trước khi đưa vào đây
+    if (opts && (opts.mode || opts.campaignN)) setMode(opts.mode, opts.campaignN);
+    room.state.mode = game.mode;
+    room.state.campaignN = game.campaignN;
   },
 
   onJoin: function (room, player) {
@@ -122,6 +159,9 @@ module.exports = {
     // player.cos (mới) hoặc player.skin (host cũ): chỉ nhận SKU đúng dạng của từng slot
     var c = cleanCos(player.cos || (player.skin ? { tank: player.skin } : null));
     if (Object.keys(c).length) cosOf[p.slot] = c; else delete cosOf[p.slot];
+    if (player.levels && typeof player.levels === 'object') levelsOf[p.slot] = cleanLevels(player.levels); else delete levelsOf[p.slot];
+    killsOf[p.slot] = 0;
+    applyLevels();
     room.send(player.id, 'you', { slot: p.slot, color: p.color });
     writeState(room);
   },
@@ -132,6 +172,8 @@ module.exports = {
     game.removePlayer(slot);
     delete slotOf[player.id];
     delete cosOf[slot];
+    delete levelsOf[slot];
+    delete killsOf[slot];
   },
 
   onMessage: function (room, player, type, d) {
@@ -161,6 +203,11 @@ module.exports = {
         game.friendlyFire = d.friendlyFire;
         writeState(room);
       }
+      // mode/màn: DO lọc trước (cờ PROGRESSION_ON + màn ≤ max_cleared+1) rồi mới chuyển tới đây
+      if (d && (d.mode === 'standard' || d.mode === 'campaign' || typeof d.campaignN === 'number')) {
+        setMode(d.mode, d.campaignN);
+        writeState(room);
+      }
     } else if (type === 'skin' || type === 'cos') {
       // Host đổi cosmetic giữa trận (sau khi mua/trang bị). Chỉ host (DO) gửi được
       // loại này — client gửi 'msg' với n='skin'/'cos' sẽ bị DO chặn trước khi tới đây.
@@ -169,14 +216,37 @@ module.exports = {
         if (Object.keys(nc).length) cosOf[slot] = nc; else delete cosOf[slot];
         writeState(room);
       }
+    } else if (type === 'levels') {
+      // Host đổi cấp giữa chừng (sau khi nâng cấp). Chỉ host (DO) gửi được; áp dụng từ lần spawn kế.
+      if (player.trusted && d && d.levels && typeof d.levels === 'object') {
+        levelsOf[slot] = cleanLevels(d.levels);
+        if (game.status !== 'playing' && game.status !== 'stageclear') applyLevels();
+      }
     } else if (type === 'start') {
       if (game.status === 'waiting') game.startGame();
-      else if (game.status === 'gameover') game.restart();
+      else if (game.status === 'gameover' || game.status === 'campaignclear') { applyLevels(); game.restart(); }
     }
   },
 
   onTick: function (room) {
+    var before = game.status;
+    if (before === 'playing' && runStatus !== 'playing') {    // lượt mới bắt đầu
+      runStatus = 'playing'; runSeq++;
+      for (var ks in killsOf) killsOf[ks] = 0;
+    }
     game.update();
+    if (game.status !== before && (game.status === 'campaignclear' || game.status === 'gameover')) {
+      runStatus = game.status;
+      if (game.mode === 'campaign') {
+        // Hợp đồng sự kiện kết quả lượt -> host (DO) ghi thưởng (idempotent theo runId:player)
+        var kills = {}, slots = {};
+        for (var pid in slotOf) { var sl = slotOf[pid]; kills[sl] = killsOf[sl] || 0; slots[sl] = pid; }
+        var ev = { runId: (room.code || 'ROOM') + '-' + runSeq + '-' + game.tick, mode: 'campaign', stage: game.campaignN,
+          win: game.status === 'campaignclear', kills: kills, slots: slots };
+        if (typeof room.runResult === 'function') { try { room.runResult(ev); } catch (e) { room.log('runResult ' + e); } }
+        room.broadcast('runResult', ev);
+      }
+    }
 
     // Đổi màn -> đẩy bản đồ đầy đủ một lần, không gửi mỗi tick
     var key = game.stage + ':' + game.status;
@@ -189,6 +259,8 @@ module.exports = {
 
   onDispose: function (room) {
     // Nộp điểm cuối trận. Đi qua room server nên platform đánh dấu verified.
+    // Chỉ mode Chuẩn lên BXH: Chiến dịch có cấp thật nên điểm không so được.
+    if (game.mode !== 'standard') return;
     var vals = [];
     for (var id in slotOf) {
       var p = game.players.get(slotOf[id]);
