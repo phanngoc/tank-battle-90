@@ -52,7 +52,7 @@ const UPGRADE_STATS = ['move', 'rof', 'bspeed', 'power', 'armor'];
 const UPGRADE_MAX = 10;
 // gold để LÊN cấp i (i = 2..10); tổng 15.300 / chỉ số, 76.500 cả 5
 const UPGRADE_COST = [0, 0, 100, 200, 400, 700, 1100, 1700, 2500, 3600, 5000];
-const ROF_COOLDOWN = [0, 8, 8, 8, 7, 7, 7, 7, 6, 6, 6];
+const ROF_COOLDOWN = [0, 8, 8, 7, 7, 7, 6, 6, 6, 5, 5];
 function clampLvl(v) { v = v | 0; return v < 1 ? 1 : v > UPGRADE_MAX ? UPGRADE_MAX : v; }
 function cleanLevels(lv) {
   const o = {};
@@ -63,10 +63,11 @@ function statsFor(levels, mode) {
   if (mode !== 'campaign' || !levels) return { speed: 2, fireCooldown: 8, bulletSpeed: 6, dmg: 1, plateTicks: 0 };
   const L = cleanLevels(levels);
   return {
-    speed: 2 * (1 + 0.025 * (L.move - 1)),                       // 2 → 2,45 px/tick
-    fireCooldown: ROF_COOLDOWN[L.rof],                            // 8 → 6 tick
+    speed: 2 * (1 + 0.033 * (L.move - 1)),                       // 2 → 2,6 px/tick (+30%)
+    fireCooldown: ROF_COOLDOWN[L.rof],                            // 8 → 5 tick
+    maxBullets: L.rof >= 9 ? 3 : L.rof >= 5 ? 2 : 1,              // đạn cùng lúc trên sân (giới hạn thật của tốc bắn)
     bulletSpeed: 6 + 2 * (L.bspeed - 1) / 9,                      // 6 → 8 px/tick
-    dmg: Math.round(10 * (1 + 0.04 * (L.power - 1))),             // máu ×10: 10 → 14
+    dmg: Math.round(10 * (1 + 0.111 * (L.power - 1))),            // máu ×10: 10 → 20 (armor chết nửa số phát)
     plateTicks: L.armor >= 2 ? Math.round(TICK_HZ * 60 * Math.pow(0.9, L.armor - 2)) : 0, // lớp giáp đỡ 1 phát
   };
 }
@@ -82,12 +83,13 @@ function campaignStage(n) {
   return {
     n, map: (n - 1) % MAPS.length,
     rec: Math.min(UPGRADE_MAX, 1 + Math.floor((n - 1) * 9 / (CAMPAIGN_STAGES - 4))) ,
-    fire: +(1 + 1.6 * t).toFixed(2),
-    armorHp: 4 + Math.floor(3 * t),
+    fire: +(1 + 0.2 * t).toFixed(2),
+    armorHp: 4 + Math.floor(3.99 * t),
+    hp: 1 + Math.floor(1.99 * t),                                 // máu địch thường (basic/fast/power)
     armorPct: Math.round(10 + 30 * t),
-    speed: n >= 12 ? 1 : 0,
-    extra: n >= 16 ? 1 : 0,
-    enemyBullet: n >= 8 ? 5 : 4,
+    speed: 0,
+    extra: 0,
+    enemyBullet: n >= 10 ? 5 : 4,
   };
 }
 function buildCampaignQueue(cs, count) {
@@ -332,7 +334,7 @@ class Game {
         id: this.nextId(), kind: 'player', slot: p.slot, color: p.color,
         x, y, w: TANK, h: TANK, dir: UP, moving: false, speed: st.speed, moveAcc: 0,
         baseBulletSpeed: st.bulletSpeed, bulletSpeed: lvl >= 1 ? Math.max(8, st.bulletSpeed) : st.bulletSpeed,
-        maxBullets: lvl >= 2 ? 2 : 1, canDestroySteel: lvl >= 3, fireCooldown: st.fireCooldown, cooldown: 0,
+        rofBullets: st.maxBullets, maxBullets: Math.max(lvl >= 2 ? 2 : 1, st.maxBullets), canDestroySteel: lvl >= 3, fireCooldown: st.fireCooldown, cooldown: 0,
         dmg: st.dmg, plateTicks: st.plateTicks, plateReadyAt: 0,
         hp: 1, spawnUntil: 0, shieldUntil: 0, stunUntil: 0, dead: false, blocked: false,
       };
@@ -350,7 +352,7 @@ class Game {
     const t = p.tankId != null ? this.tanks.find(k => k.id === p.tankId) : null;
     if (!t) return;
     t.bulletSpeed = t.baseBulletSpeed ? (p.level >= 1 ? Math.max(8, t.baseBulletSpeed) : t.baseBulletSpeed) : (p.level >= 1 ? 8 : 6);
-    t.maxBullets = p.level >= 2 ? 2 : 1;
+    t.maxBullets = Math.max(p.level >= 2 ? 2 : 1, t.rofBullets || 1);
     t.canDestroySteel = p.level >= 3;
   }
 
@@ -441,7 +443,7 @@ class Game {
     const cs = this.cs;
     const speed = cs ? tpl.speed + cs.speed : tpl.speed + (this.stage >= 4 ? 1 : 0);
     // campaign: máu ×10 (đạn người chơi gây 10..14); armor theo bảng màn
-    const hp = cs ? (type === 'armor' ? cs.armorHp : tpl.hp) * 10 : tpl.hp;
+    const hp = cs ? (type === 'armor' ? cs.armorHp : cs.hp) * 10 : tpl.hp;
     this.tanks.push({
       id: this.nextId(), kind: 'enemy', enemyType: type, tclass: tpl.tclass,
       x: sp.x, y: sp.y, w: TANK, h: TANK, dir: DOWN, moving: true, speed,
