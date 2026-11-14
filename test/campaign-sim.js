@@ -10,6 +10,12 @@ function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; le
 const BX = 13 * 16, BY = 25 * 16;
 
 function botControl(g, p, mem) {
+  botDecide(g, p, mem);
+  // engine chỉ xoay xe khi đang bấm hướng: muốn ngắm mà đứng yên thì vẫn phải bấm 1 tick
+  const t = p.tankId != null ? g.tanks.find(k => k.id === p.tankId) : null;
+  if (t && !p.ctrl.moving && t.dir !== p.ctrl.dir) p.ctrl.moving = true;
+}
+function botDecide(g, p, mem) {
   const t = p.tankId != null ? g.tanks.find(k => k.id === p.tankId) : null;
   if (!t) return;
   const en = g.tanks.filter(k => k.kind === 'enemy' && !k.dead && k.spawnUntil <= g.tick);
@@ -64,6 +70,11 @@ function safeFire(t, dir) {
   if ((dir === 1 && cx < BX || dir === 3 && cx > BX) && Math.abs(cy - BY) < 26) return false;
   return true;
 }
+// SIM_HANDICAP: bot phản xạ kém người thật, nên trong sim mọi địch bắn ít đi theo hệ số này
+// (cả mode Chuẩn lẫn Chiến dịch => so sánh tương đối vẫn đúng). Chỉnh sao cho bot thắng
+// mode Chuẩn màn 1 solo ≈ 65–75% (= "người chơi trung bình"). Không có trong game thật.
+let SIM_HANDICAP = +(process.env.SIM_HANDICAP || 0.15);
+function setHandicap(k) { SIM_HANDICAP = k; }
 function runOne(stage, lvl, nPlayers, seed) {
   const orig = Math.random; Math.random = mulberry32(seed);
   try {
@@ -78,7 +89,8 @@ function runOne(stage, lvl, nPlayers, seed) {
       for (const p of g.players.values()) { if (!mem.has(p.slot)) mem.set(p.slot, { stuck: 0, wander: 0 }); botControl(g, p, mem.get(p.slot)); }
       for (const p of g.players.values()) { const t = p.tankId != null && g.tanks.find(k => k.id === p.tankId); if (t && !safeFire(t, p.ctrl.moving ? p.ctrl.dir : t.dir)) p.ctrl.fire = false; }
       g.update();
-      if (g.status === 'campaignclear') return { win: true, ticks: i, lostLives: [...g.players.values()].reduce((a, p) => a + (3 - p.lives), 0) };
+      for (const e of g.tanks) if (e.kind === 'enemy' && !e.simH) { e.simH = 1; e.fireProb *= SIM_HANDICAP; }
+      if (g.status === 'campaignclear' || g.status === 'stageclear') return { win: true, ticks: i, lostLives: [...g.players.values()].reduce((a, p) => a + (3 - p.lives), 0) };
       if (g.status === 'gameover') return { win: false, ticks: i, base: !g.baseAlive };
     }
     return { win: false, ticks: -1 };
@@ -108,4 +120,4 @@ if (require.main === module) {
   console.log(`(${trials} lượt/ô, ${((Date.now() - t0) / 1000).toFixed(1)}s)`);
   const out = arg('json', null); if (out) require('fs').writeFileSync(out, JSON.stringify(rows, null, 2));
 }
-module.exports = { runOne, botControl };
+module.exports = { runOne, botControl, setHandicap };
