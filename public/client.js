@@ -961,7 +961,15 @@ function closeShop() {
   if (pollTimer) clearInterval(pollTimer); pollTimer = null;
   if (pvRaf) cancelAnimationFrame(pvRaf); pvRaf = 0;
   if (shopEl) shopEl.remove(); shopEl = null;
+  document.body.classList.remove('sheet-open');
 }
+// bottom-sheet: thanh kéo + nút ✕ 44px (id shopClose) — gắn lại mỗi lần vẽ thẻ
+function sheetHead(card) {
+  card.appendChild(el('div', { className: 'sheet-handle' }));
+  const x = el('button', { className: 'sheet-x', id: 'shopClose', type: 'button', title: 'Đóng' }, '✕');
+  x.setAttribute('aria-label', 'Đóng'); x.onclick = closeShop; card.appendChild(x);
+}
+window.addEventListener('keydown', (e) => { if (shopEl && e.key === 'Escape') { e.stopPropagation(); closeShop(); } }, true);
 async function loadShop() {
   shopItems = await api('GET', '/v1/shop');
   await refreshOwned();
@@ -974,20 +982,23 @@ function seasonText(it) { const [a] = it.season || ['']; return 'Mở bán ' + a
 async function openShop(tab, focusSku) {
   closeShop();
   shopEl = el('div', { id: 'shop', className: 'shop-modal' });
-  const card = el('div', { className: 'shop-card shop-wide' });
+  const card = el('div', { className: 'shop-card shop-sheet' });
+  card.setAttribute('role', 'dialog'); card.setAttribute('aria-modal', 'true');
   shopEl.appendChild(card);
   shopEl.addEventListener('click', (e) => { if (e.target === shopEl) closeShop(); });
   document.body.appendChild(shopEl);
-  card.innerHTML = '<div class="shop-title">🛒 Cửa hàng</div><div class="shop-list">Đang tải…</div>';
+  document.body.classList.add('sheet-open');
+  sheetHead(card);
+  card.insertAdjacentHTML('beforeend', '<div class="shop-title">🛒 Cửa hàng</div><div class="shop-list">Đang tải…</div>');
   try { await loadShop(); }
-  catch (e) { card.querySelector('.shop-list').textContent = 'Không tải được cửa hàng.'; card.appendChild(closeBtn()); return; }
+  catch (e) { card.querySelector('.shop-list').textContent = 'Không tải được cửa hàng.'; return; }
   renderShop(card, tab || 'tank', focusSku);
 }
-function closeBtn() { const b = el('button', { className: 'ov-btn ghost', id: 'shopClose' }, 'Đóng'); b.onclick = closeShop; return b; }
 
 function renderShop(card, tab, focusSku) {
   if (pvRaf) cancelAnimationFrame(pvRaf); pvRaf = 0;
   card.innerHTML = '';
+  sheetHead(card);
   card.appendChild(el('div', { className: 'shop-title' }, '🛒 Cửa hàng'));
   const tabs = el('div', { className: 'shop-tabs' });
   for (const [k, label] of TABS) {
@@ -1004,7 +1015,6 @@ function renderShop(card, tab, focusSku) {
   const grid = el('div', { className: 'shop-grid' });
   card.appendChild(grid);
   card.appendChild(el('div', { className: 'shop-note' }, 'Chỉ trang trí — không thay đổi sức mạnh xe. Đại bàng + bản đồ: cả phòng thấy theo đồ của chủ phòng.'));
-  card.appendChild(closeBtn());
 
   let list;
   if (tab === 'inv') list = shopItems.filter((it) => it.slot && isOwned(it.sku));
@@ -1079,20 +1089,46 @@ async function equip(slot, sku, card, tab, focusSku) {
   renderShop(card, tab, focusSku);
 }
 
+function copyText(text) {
+  const done = () => toast('Đã sao chép');
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  else fallbackCopy(text, done);
+}
+// Deeplink VietQR chỉ khi biết BIN ngân hàng và có STK số thật; không thì ẩn nút, hiện gợi ý lưu ảnh QR.
+const BANK_BIN = { mbbank: ['970422', 'mb'], mb: ['970422', 'mb'], vietcombank: ['970436', 'vcb'], vcb: ['970436', 'vcb'], vietinbank: ['970415', 'icb'], icb: ['970415', 'icb'],
+  bidv: ['970418', 'bidv'], techcombank: ['970407', 'tcb'], tcb: ['970407', 'tcb'], acb: ['970416', 'acb'], tpbank: ['970423', 'tpb'], vpbank: ['970432', 'vpb'] };
+function bankDeeplink(q, amount, code) {
+  const b = BANK_BIN[String(q.bank || '').toLowerCase().replace(/[^a-z]/g, '')];
+  if (!b || !/^\d{6,}$/.test(String(q.account || ''))) return '';
+  return 'https://dl.vietqr.io/pay?app=' + b[1] + '&ba=' + encodeURIComponent(q.account + '@' + b[0]) + '&am=' + encodeURIComponent(amount) + '&tn=' + encodeURIComponent(code);
+}
 async function buy(sku, card) {
   let o;
   try { o = await api('POST', '/v1/orders', { sku }); }
   catch (e) { toast(e.code === 'LIMIT_REACHED' ? 'Bạn đã có món này.' : e.code === 'OUT_OF_SEASON' ? 'Món theo mùa, chưa mở bán.' : 'Không tạo được đơn: ' + (e.code || e.message)); return; }
   if (pvRaf) cancelAnimationFrame(pvRaf); pvRaf = 0;
   const it = itemOf(sku) || { label: sku };
-  card.innerHTML = (o.sandbox ? '<div class="shop-sandbox">SANDBOX — chưa nhận tiền thật</div>' : '') +
+  const q = o.qr || {};
+  const dl = bankDeeplink(q, o.amount, o.code);
+  const row = (k, label, val, cls) => '<div class="pay-row"><span class="pay-k">' + label + '</span><span class="pay-v' + (cls ? ' ' + cls : '') + '">' + escapeHtml(val) + '</span>' +
+    '<button type="button" class="pay-copy" data-copy="' + k + '" aria-label="Sao chép ' + label + '">Sao chép</button></div>';
+  const copyVals = { bank: q.bank || '', acc: q.account || '', name: q.accountName || '', amount: String(o.amount), code: o.code };
+  card.innerHTML = '';
+  sheetHead(card);
+  card.insertAdjacentHTML('beforeend', (o.sandbox ? '<div class="shop-sandbox">SANDBOX — chưa nhận tiền thật</div>' : '') +
     '<div class="shop-title">Quét mã để thanh toán</div><div class="shop-desc">' + escapeHtml(it.label) + '</div>' +
-    '<img class="shop-qr" alt="QR" src="' + o.qr.imageUrl + '">' +
-    '<div class="shop-info">' + escapeHtml(o.qr.bank + ' · ' + o.qr.account + (o.qr.accountName ? ' · ' + o.qr.accountName : '')) + '<br>Số tiền: <b>' + fmtVnd(o.amount) + '</b><br>Nội dung CK: <b class="shop-code">' + o.code + '</b></div>' +
+    '<div class="pay-amount">' + fmtVnd(o.amount) + '</div>' +
+    '<div class="pay-code-big">Mã đơn <b class="shop-code">' + escapeHtml(o.code) + '</b></div>' +
+    '<img class="shop-qr" alt="Mã QR chuyển khoản" src="' + escapeHtml(q.imageUrl || '') + '">' +
+    '<div class="pay-rows">' + row('bank', 'Ngân hàng', copyVals.bank) + row('acc', 'Số TK', copyVals.acc, 'mono') +
+      (copyVals.name ? row('name', 'Chủ TK', copyVals.name) : '') + row('amount', 'Số tiền', fmtVnd(o.amount)) + row('code', 'Nội dung CK', o.code, 'mono') + '</div>' +
+    (dl ? '<a class="ov-btn pay-open" id="payOpenApp" href="' + escapeHtml(dl) + '" target="_blank" rel="noopener">🏦 Mở app ngân hàng</a>'
+        : '<div class="pay-hint">Lưu ảnh QR (nhấn giữ ảnh) rồi mở app ngân hàng → Quét QR.</div>') +
     '<div class="shop-status" id="shopStatus">⏳ Đang chờ thanh toán…</div>' +
     (o.sandbox ? '<button class="ov-btn" id="sbxConfirm">✅ Xác nhận (sandbox)</button>' : '') +
-    '<button class="ov-btn ghost" id="shopBack">← Cửa hàng</button>';
-  card.appendChild(closeBtn());
+    '<button class="ov-btn ghost" id="shopBack">← Cửa hàng</button>');
+  card.scrollTop = 0;
+  card.querySelectorAll('.pay-copy').forEach((b) => { b.onclick = () => copyText(copyVals[b.dataset.copy]); });
   card.querySelector('#shopBack').onclick = () => { if (pollTimer) clearInterval(pollTimer); pollTimer = null; openShop(); };
   const sbx = card.querySelector('#sbxConfirm');
   if (sbx) sbx.onclick = async () => { sbx.disabled = true; try { await api('POST', '/v1/pay/sandbox/confirm', { orderId: o.orderId }); } catch (e) { sbx.disabled = false; } check(); };
